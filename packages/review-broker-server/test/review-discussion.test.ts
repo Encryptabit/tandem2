@@ -7,7 +7,7 @@ import { createAppContext } from '../src/runtime/app-context.js';
 import { createBrokerService } from '../src/runtime/broker-service.js';
 import { afterEach, describe, expect, it } from 'vitest';
 
-const WORKTREE_ROOT = '/home/cari/repos/tandem2/.gsd/worktrees/M001';
+import { WORKTREE_ROOT } from './test-paths.js';
 const tempDirectories: string[] = [];
 const openContexts: AppContext[] = [];
 

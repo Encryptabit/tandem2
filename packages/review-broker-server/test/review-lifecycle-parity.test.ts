@@ -8,7 +8,7 @@ import type { StartedBrokerRuntime } from '../src/index.js';
 import { inspectBrokerRuntime, startBroker } from '../src/index.js';
 import { BrokerServiceError } from '../src/runtime/broker-service.js';
 
-const WORKTREE_ROOT = '/home/cari/repos/tandem2/.gsd/worktrees/M001';
+import { WORKTREE_ROOT } from './test-paths.js';
 const tempDirectories: string[] = [];
 const openRuntimes: StartedBrokerRuntime[] = [];
 

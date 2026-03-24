@@ -6,15 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createBrokerClient, createInProcessBrokerClient, startInProcessBrokerClient, type BrokerServiceLike } from '../src/index.js';
 
-const WORKTREE_ROOT = '/home/cari/repos/tandem2/.gsd/worktrees/M001';
-const REVIEWER_FIXTURE_PATH = path.join(
-  WORKTREE_ROOT,
-  'packages',
-  'review-broker-server',
-  'test',
-  'fixtures',
-  'reviewer-worker.mjs',
-);
+import { REVIEWER_FIXTURE_PATH, WORKTREE_ROOT } from '../../review-broker-server/test/test-paths.js';
 const tempDirectories: string[] = [];
 const openClients: Array<{ close(): void; waitUntilStopped(): Promise<void> }> = [];
 

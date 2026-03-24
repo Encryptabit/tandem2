@@ -9,10 +9,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createAppContext } from '../src/runtime/app-context.js';
 import { createBrokerService } from '../src/runtime/broker-service.js';
 
-const WORKTREE_ROOT = '/home/cari/repos/tandem2/.gsd/worktrees/M001';
+import { FIXTURE_PATH, WORKTREE_ROOT } from './test-paths.js';
 const CLI_PATH = path.join(WORKTREE_ROOT, 'packages', 'review-broker-server', 'src', 'cli', 'start-broker.ts');
 const TSX_PATH = path.join(WORKTREE_ROOT, 'node_modules', '.bin', 'tsx');
-const FIXTURE_PATH = path.join(WORKTREE_ROOT, 'packages', 'review-broker-server', 'test', 'fixtures', 'reviewer-worker.mjs');
 const tempDirectories: string[] = [];
 
 afterEach(() => {

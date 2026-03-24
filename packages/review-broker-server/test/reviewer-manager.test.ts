@@ -6,8 +6,7 @@ import type { AppContext } from '../src/runtime/app-context.js';
 import { createAppContext } from '../src/runtime/app-context.js';
 import { afterEach, describe, expect, it } from 'vitest';
 
-const WORKTREE_ROOT = '/home/cari/repos/tandem2/.gsd/worktrees/M001';
-const FIXTURE_PATH = path.join(WORKTREE_ROOT, 'packages', 'review-broker-server', 'test', 'fixtures', 'reviewer-worker.mjs');
+import { FIXTURE_PATH, WORKTREE_ROOT } from './test-paths.js';
 const tempDirectories: string[] = [];
 const openContexts: AppContext[] = [];
 

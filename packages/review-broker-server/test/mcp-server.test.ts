@@ -9,17 +9,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { BROKER_OPERATION_MCP_TOOL_NAMES, BROKER_OPERATIONS } from 'review-broker-core';
 
-const WORKTREE_ROOT = '/home/cari/repos/tandem2/.gsd/worktrees/M001';
+import { REVIEWER_FIXTURE_PATH, WORKTREE_ROOT } from './test-paths.js';
 const CLI_PATH = path.join(WORKTREE_ROOT, 'packages', 'review-broker-server', 'src', 'cli', 'start-mcp.ts');
 const TSX_PATH = path.join(WORKTREE_ROOT, 'node_modules', '.bin', 'tsx');
-const REVIEWER_FIXTURE_PATH = path.join(
-  WORKTREE_ROOT,
-  'packages',
-  'review-broker-server',
-  'test',
-  'fixtures',
-  'reviewer-worker.mjs',
-);
 const tempDirectories: string[] = [];
 const openClients: Array<{ client: Client; transport: StdioClientTransport }> = [];
 

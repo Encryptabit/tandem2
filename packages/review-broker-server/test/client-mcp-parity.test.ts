@@ -12,15 +12,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { StartedBrokerRuntime } from '../src/index.js';
 import { createBrokerMcpServer, startBroker } from '../src/index.js';
 
-const WORKTREE_ROOT = '/home/cari/repos/tandem2/.gsd/worktrees/M001';
-const REVIEWER_FIXTURE_PATH = path.join(
-  WORKTREE_ROOT,
-  'packages',
-  'review-broker-server',
-  'test',
-  'fixtures',
-  'reviewer-worker.mjs',
-);
+import { REVIEWER_FIXTURE_PATH, WORKTREE_ROOT } from './test-paths.js';
 const tempDirectories: string[] = [];
 const openRuntimes: StartedBrokerRuntime[] = [];
 const openMcpConnections: Array<{ client: Client; server: McpServer }> = [];
