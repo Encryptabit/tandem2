@@ -1,0 +1,9 @@
+diff --git a/packages/review-broker-server/src/runtime/_proposal_fixture_valid.ts b/packages/review-broker-server/src/runtime/_proposal_fixture_valid.ts
+new file mode 100644
+index 0000000..6c55ed8
+--- /dev/null
++++ b/packages/review-broker-server/src/runtime/_proposal_fixture_valid.ts
+@@ -0,0 +1,3 @@
++export const proposalFixture = 'valid';
++
++console.log(proposalFixture);

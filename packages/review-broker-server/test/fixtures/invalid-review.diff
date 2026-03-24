@@ -1,0 +1,7 @@
+diff --git a/packages/review-broker-server/src/runtime/_proposal_fixture_missing.ts b/packages/review-broker-server/src/runtime/_proposal_fixture_missing.ts
+index 1111111..2222222 100644
+--- a/packages/review-broker-server/src/runtime/_proposal_fixture_missing.ts
++++ b/packages/review-broker-server/src/runtime/_proposal_fixture_missing.ts
+@@ -1 +1 @@
+-old value
++new value

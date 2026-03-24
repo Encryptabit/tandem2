@@ -1,0 +1,28 @@
+{
+  "name": "tandem2",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.6.5",
+  "type": "module",
+  "scripts": {
+    "build": "corepack pnpm -r --if-present run build",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "broker:start": "corepack pnpm --filter review-broker-server exec tsx src/cli/start-broker.ts",
+    "broker:smoke": "corepack pnpm --filter review-broker-server exec tsx src/cli/start-broker.ts --db-path ./.tmp/s01-smoke.sqlite --once",
+    "broker:mcp": "corepack pnpm --filter review-broker-server exec tsx src/cli/start-mcp.ts",
+    "broker:parity": "vitest run packages/review-broker-server/test/end-to-end-standalone-parity.test.ts",
+    "broker:test": "vitest run packages/review-broker-server/test/restart-persistence.test.ts packages/review-broker-server/test/start-broker.smoke.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.8"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3"
+    ]
+  }
+}

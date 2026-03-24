@@ -1,6 +1,11 @@
 
 # ── GSD baseline (auto-generated) ──
 .gsd
+!.gsd/
+.gsd/*
+!.gsd/DECISIONS.md
+!.gsd/milestones/
+!.gsd/milestones/**
 .DS_Store
 Thumbs.db
 *.swp
@@ -26,3 +31,5 @@ vendor/
 coverage/
 .cache/
 tmp/
+.tmp-review-*/
+.tmp-review-runtime-proof/

@@ -1,0 +1,8 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "review-broker-core": ["packages/review-broker-core/dist/index.d.ts"]
+    }
+  }
+}

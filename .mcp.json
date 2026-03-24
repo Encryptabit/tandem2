@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "review-broker": {
+      "type": "stdio",
+      "command": "corepack",
+      "args": ["pnpm", "broker:mcp"]
+    }
+  }
+}

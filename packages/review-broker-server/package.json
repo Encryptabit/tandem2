@@ -1,0 +1,38 @@
+{
+  "name": "review-broker-server",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "review-broker-server": "./dist/cli/start-broker.js",
+    "review-broker-mcp": "./dist/cli/start-mcp.js"
+  },
+  "files": [
+    "dist",
+    "src/db/migrations"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "start": "tsx src/cli/start-broker.ts",
+    "start:once": "tsx src/cli/start-broker.ts --once",
+    "start:mcp": "tsx src/cli/start-mcp.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.18.1",
+    "better-sqlite3": "^11.10.0",
+    "parse-diff": "^0.11.1",
+    "review-broker-core": "workspace:*",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12"
+  }
+}
