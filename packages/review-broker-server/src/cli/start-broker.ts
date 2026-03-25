@@ -1,11 +1,17 @@
 #!/usr/bin/env node
+import path from 'node:path';
 import process from 'node:process';
 
 import { inspectBrokerRuntime, startBroker } from '../index.js';
+import { createDashboardRoutes } from '../http/dashboard-routes.js';
+import { createDashboardServer } from '../http/dashboard-server.js';
 
 interface CliOptions {
   help: boolean;
   once: boolean;
+  dashboard: boolean;
+  dashboardPort?: number;
+  dashboardHost?: string;
   cwd?: string;
   dbPath?: string;
   busyTimeoutMs?: number;
@@ -26,9 +32,11 @@ async function main(): Promise<void> {
       ...(options.busyTimeoutMs !== undefined ? { busyTimeoutMs: options.busyTimeoutMs } : {}),
     });
 
+    const mode = options.once ? 'once' : options.dashboard ? 'dashboard' : 'serve';
+
     emit('broker.started', {
       startedAt: runtime.startedAt,
-      mode: options.once ? 'once' : 'serve',
+      mode,
       dbPath: runtime.context.dbPath,
       dbPathSource: runtime.context.dbPathSource,
       workspaceRoot: runtime.context.workspaceRoot,
@@ -64,6 +72,43 @@ async function main(): Promise<void> {
       return;
     }
 
+    if (options.dashboard) {
+      const dashboardDistPath = resolveDashboardDistPath(runtime.context.workspaceRoot);
+      const routes = createDashboardRoutes({
+        context: runtime.context,
+        service: runtime.service,
+        startupRecoverySnapshot: runtime.getStartupRecoverySnapshot(),
+      });
+
+      const server = await createDashboardServer({
+        dashboardDistPath,
+        routes,
+        ...(options.dashboardHost !== undefined ? { host: options.dashboardHost } : {}),
+        ...(options.dashboardPort !== undefined ? { port: options.dashboardPort } : {}),
+      });
+
+      emit('broker.dashboard_ready', {
+        url: server.baseUrl,
+        port: server.port,
+        dashboardDistPath,
+      });
+
+      // Gracefully tear down on broker stop
+      const originalClose = runtime.close;
+      runtime.close = () => {
+        routes.dispose();
+        void server.close();
+        originalClose();
+      };
+
+      await runtime.waitUntilStopped();
+      emit('broker.stopped', {
+        dbPath: runtime.context.dbPath,
+        shutdown: runtime.getShutdownSnapshot(),
+      });
+      return;
+    }
+
     await runtime.waitUntilStopped();
     emit('broker.stopped', {
       dbPath: runtime.context.dbPath,
@@ -90,6 +135,7 @@ function parseCliArgs(argv: string[]): CliOptions {
   const options: CliOptions = {
     help: false,
     once: false,
+    dashboard: false,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -106,6 +152,33 @@ function parseCliArgs(argv: string[]): CliOptions {
 
     if (argument === '--once') {
       options.once = true;
+      continue;
+    }
+
+    if (argument === '--dashboard') {
+      options.dashboard = true;
+      continue;
+    }
+
+    if (argument.startsWith('--dashboard-port=')) {
+      options.dashboardPort = parsePositiveInteger(argument.slice('--dashboard-port='.length), '--dashboard-port');
+      continue;
+    }
+
+    if (argument === '--dashboard-port') {
+      options.dashboardPort = parsePositiveInteger(requireValue(argv, index, '--dashboard-port'), '--dashboard-port');
+      index += 1;
+      continue;
+    }
+
+    if (argument.startsWith('--dashboard-host=')) {
+      options.dashboardHost = argument.slice('--dashboard-host='.length);
+      continue;
+    }
+
+    if (argument === '--dashboard-host') {
+      options.dashboardHost = requireValue(argv, index, '--dashboard-host');
+      index += 1;
       continue;
     }
 
@@ -180,7 +253,23 @@ function emit(event: string, payload: Record<string, unknown>, stream: 'stdout' 
 }
 
 function printUsage(): void {
-  process.stdout.write(`Usage: start-broker [options]\n\nOptions:\n  --db-path <path>          Override the SQLite database path\n  --cwd <path>              Resolve workspace-relative paths from this directory\n  --busy-timeout-ms <ms>    Override SQLite busy_timeout PRAGMA\n  --once                    Open, migrate, report state, and exit\n  -h, --help                Show this help message\n`);
+  process.stdout.write(`Usage: start-broker [options]\n\nOptions:\n  --db-path <path>          Override the SQLite database path\n  --cwd <path>              Resolve workspace-relative paths from this directory\n  --busy-timeout-ms <ms>    Override SQLite busy_timeout PRAGMA\n  --once                    Open, migrate, report state, and exit\n  --dashboard               Start the broker with the mounted dashboard HTTP server\n  --dashboard-port <port>   Dashboard HTTP port (default: 0 = OS-assigned)\n  --dashboard-host <host>   Dashboard HTTP host (default: 127.0.0.1)\n  -h, --help                Show this help message\n`);
+}
+
+/**
+ * Resolve the dashboard dist path relative to the workspace root.
+ * Walks up from the broker-server package to find the sibling dashboard package.
+ */
+function resolveDashboardDistPath(cwd: string): string {
+  // Try relative to cwd (workspace root) first
+  const fromCwd = path.resolve(cwd, 'packages', 'review-broker-dashboard', 'dist');
+  // Fallback: resolve relative to this CLI file's package
+  const fromPackage = path.resolve(
+    path.dirname(new URL(import.meta.url).pathname),
+    '..', '..', '..', 'review-broker-dashboard', 'dist',
+  );
+  // Prefer the cwd-relative path if it's a workspace context; otherwise use the package-relative one
+  return fromCwd.includes('review-broker-dashboard') ? fromCwd : fromPackage;
 }
 
 await main();

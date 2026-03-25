@@ -1,0 +1,34 @@
+---
+// Broker-served dashboard — reviews browser page.
+// Two views: review list (default) and review detail (when ?id= param set).
+// SSE triggers re-fetches; all data is runtime-fetched JSON, no build-time data.
+import '../styles/dashboard.css';
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Reviews — Review Broker Dashboard</title>
+  </head>
+  <body>
+    <header>
+      <h1>Review Broker</h1>
+      <nav class="nav">
+        <a href="/">Overview</a>
+        <a href="/events/">Events</a>
+        <a href="/reviews/" class="active" aria-current="page">Reviews</a>
+      </nav>
+      <span class="status-badge" id="connection-status" data-state="loading">loading</span>
+      <span class="header-meta" id="last-refresh"></span>
+    </header>
+    <main>
+      <div id="reviews-root">
+        <div class="loading-state">Connecting to broker…</div>
+      </div>
+    </main>
+    <script>
+      import '../components/reviews-client.ts';
+    </script>
+  </body>
+</html>

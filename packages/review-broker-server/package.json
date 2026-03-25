@@ -23,6 +23,7 @@
     "test": "vitest run",
     "start": "tsx src/cli/start-broker.ts",
     "start:once": "tsx src/cli/start-broker.ts --once",
+    "start:dashboard": "tsx src/cli/start-broker.ts --dashboard",
     "start:mcp": "tsx src/cli/start-mcp.ts"
   },
   "dependencies": {

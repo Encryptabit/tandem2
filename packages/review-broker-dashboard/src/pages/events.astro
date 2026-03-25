@@ -1,0 +1,35 @@
+---
+// Broker-served dashboard — events page.
+// Renders a live, filterable feed of broker audit events from /api/events/feed.
+// SSE triggers re-fetches; all data is runtime-fetched JSON, no build-time data.
+import '../styles/dashboard.css';
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Events — Review Broker Dashboard</title>
+  </head>
+  <body>
+    <header>
+      <h1>Review Broker</h1>
+      <nav class="nav">
+        <a href="/">Overview</a>
+        <a href="/events/" class="active" aria-current="page">Events</a>
+        <a href="/reviews/">Reviews</a>
+      </nav>
+      <span class="status-badge" id="connection-status" data-state="loading">loading</span>
+      <span class="header-meta" id="last-refresh"></span>
+    </header>
+    <main>
+      <div id="events-filter"></div>
+      <div id="events-list">
+        <div class="loading-state">Connecting to broker…</div>
+      </div>
+    </main>
+    <script>
+      import '../components/events-client.ts';
+    </script>
+  </body>
+</html>

@@ -1,0 +1,13 @@
+{
+  "name": "review-broker-dashboard",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "astro build",
+    "dev": "astro dev"
+  },
+  "dependencies": {
+    "astro": "^5.7.10"
+  }
+}

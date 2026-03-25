@@ -1,0 +1,34 @@
+---
+// Broker-served dashboard — renders overview cards, reviewer state,
+// and startup-recovery context from the broker's /api/overview route.
+// SSE triggers re-fetches; the snapshot is the single source of truth.
+import '../styles/dashboard.css';
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Review Broker Dashboard</title>
+  </head>
+  <body>
+    <header>
+      <h1>Review Broker</h1>
+      <nav class="nav">
+        <a href="/" class="active" aria-current="page">Overview</a>
+        <a href="/events/">Events</a>
+        <a href="/reviews/">Reviews</a>
+      </nav>
+      <span class="status-badge" id="connection-status" data-state="loading">loading</span>
+      <span class="header-meta" id="last-refresh"></span>
+    </header>
+    <main>
+      <div id="overview-root">
+        <div class="loading-state">Connecting to broker…</div>
+      </div>
+    </main>
+    <script>
+      import '../components/overview-client.ts';
+    </script>
+  </body>
+</html>

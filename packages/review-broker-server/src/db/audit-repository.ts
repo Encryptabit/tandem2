@@ -40,11 +40,18 @@ export interface ListActivityOptions {
   limit?: number;
 }
 
+export interface ListGlobalOptions {
+  limit?: number | undefined;
+  beforeId?: number | undefined;
+  eventType?: string | undefined;
+}
+
 export interface AuditRepository {
   append: (input: AppendAuditEventInput) => AuditEventRecord;
   listForReview: (reviewId: string) => AuditEventRecord[];
   listActivityForReview: (reviewId: string, options?: ListActivityOptions) => ReviewActivityEntry[];
   getLatestForReview: (reviewId: string) => AuditEventRecord | null;
+  listGlobal: (options?: ListGlobalOptions) => AuditEventRecord[];
 }
 
 const AUDIT_SELECT_COLUMNS = `
@@ -172,6 +179,30 @@ export function createAuditRepository(db: Database.Database): AuditRepository {
         .get(reviewId);
 
       return row ? mapAuditEventRow(row) : null;
+    },
+
+    listGlobal(options = {}) {
+      // Cap at 201 to allow callers to request limit+1 for hasMore probing
+      const limit = Math.min(Math.max(options.limit ?? 50, 1), 201);
+      const params: Record<string, number | string | null> = {
+        beforeId: options.beforeId ?? null,
+        eventType: options.eventType ?? null,
+        limit,
+      };
+
+      const rows = db
+        .prepare<Record<string, number | string | null>, AuditEventRow>(`
+          SELECT
+            ${AUDIT_SELECT_COLUMNS}
+          FROM audit_events
+          WHERE (audit_event_id < @beforeId OR @beforeId IS NULL)
+            AND (event_type = @eventType OR @eventType IS NULL)
+          ORDER BY created_at DESC, audit_event_id DESC
+          LIMIT @limit
+        `)
+        .all(params);
+
+      return rows.map((row) => mapAuditEventRow(row));
     },
   };
 }

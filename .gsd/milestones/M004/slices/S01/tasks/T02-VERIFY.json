@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "taskId": "T02",
+  "unitId": "M004/S01/T02",
+  "timestamp": 1774472627610,
+  "passed": false,
+  "discoverySource": "package-json",
+  "checks": [
+    {
+      "command": "npm run test",
+      "exitCode": 1,
+      "durationMs": 4421,
+      "verdict": "fail"
+    }
+  ],
+  "retryAttempt": 1,
+  "maxRetries": 2,
+  "runtimeErrors": [
+    {
+      "source": "bg-shell",
+      "severity": "crash",
+      "message": "[dashboard-server] exitCode=1 errors: Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/home/cari/.gsd/projects/d0a5fec22ef7/worktrees/M004/packages/review-broker-server/packages/review-broker-server/test/verify-dashboard.mjs' imported f; ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command failed with exit code 1: tsx packages/review-broker-server/test/verify-dashboard.mjs",
+      "blocking": true
+    }
+  ]
+}

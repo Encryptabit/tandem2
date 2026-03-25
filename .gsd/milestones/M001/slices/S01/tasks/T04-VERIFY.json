@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "taskId": "T04",
+  "unitId": "M001/S01/T04",
+  "timestamp": 1774088289862,
+  "passed": false,
+  "discoverySource": "package-json",
+  "checks": [
+    {
+      "command": "npm run test",
+      "exitCode": 0,
+      "durationMs": 1266,
+      "verdict": "pass"
+    }
+  ],
+  "retryAttempt": 1,
+  "maxRetries": 2,
+  "runtimeErrors": [
+    {
+      "source": "bg-shell",
+      "severity": "crash",
+      "message": "[interactive shell for pnpm approve-builds] signal=SIGTERM",
+      "blocking": true
+    }
+  ]
+}

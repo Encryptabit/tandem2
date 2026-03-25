@@ -9,9 +9,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createAppContext } from '../src/runtime/app-context.js';
 import { createBrokerService } from '../src/runtime/broker-service.js';
 
-import { FIXTURE_PATH, WORKTREE_ROOT } from './test-paths.js';
-const CLI_PATH = path.join(WORKTREE_ROOT, 'packages', 'review-broker-server', 'src', 'cli', 'start-broker.ts');
-const TSX_PATH = path.join(WORKTREE_ROOT, 'node_modules', '.bin', 'tsx');
+import { CLI_PATH, FIXTURE_PATH, TSX_PATH, WORKTREE_ROOT } from './test-paths.js';
 const tempDirectories: string[] = [];
 
 afterEach(() => {
@@ -248,6 +246,94 @@ describe('review-broker-server standalone start command', () => {
       });
     } finally {
       db.close();
+    }
+  });
+});
+
+describe('review-broker-server dashboard mode', () => {
+  it('starts the broker with --dashboard flag, emits dashboard_ready event with URL, and serves the overview API', async () => {
+    const directory = mkdtempSync(path.join(os.tmpdir(), 'review-broker-dashboard-smoke-'));
+    tempDirectories.push(directory);
+
+    const dbPath = path.join(directory, 'dashboard-smoke.sqlite');
+
+    const { spawn } = await import('node:child_process');
+    const child = spawn(TSX_PATH, [CLI_PATH, '--db-path', dbPath, '--dashboard', '--dashboard-port', '0'], {
+      cwd: WORKTREE_ROOT,
+      env: process.env,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    try {
+      // Collect stdout lines until we get dashboard_ready
+      const dashboardReadyEvent = await new Promise<Record<string, unknown>>((resolve, reject) => {
+        let buffer = '';
+        const timeout = setTimeout(() => {
+          reject(new Error('Timed out waiting for broker.dashboard_ready event'));
+        }, 15_000);
+
+        child.stdout!.on('data', (chunk: Buffer) => {
+          buffer += chunk.toString();
+          const lines = buffer.split('\n');
+          buffer = lines.pop() ?? '';
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (trimmed.length === 0) continue;
+            try {
+              const event = JSON.parse(trimmed) as Record<string, unknown>;
+              if (event.event === 'broker.dashboard_ready') {
+                clearTimeout(timeout);
+                resolve(event);
+              }
+            } catch {
+              // non-JSON line, skip
+            }
+          }
+        });
+
+        child.on('error', (error) => {
+          clearTimeout(timeout);
+          reject(error);
+        });
+
+        child.on('exit', (code) => {
+          clearTimeout(timeout);
+          reject(new Error(`Broker exited with code ${code} before emitting dashboard_ready`));
+        });
+      });
+
+      // Verify the dashboard_ready event shape
+      expect(dashboardReadyEvent).toMatchObject({
+        event: 'broker.dashboard_ready',
+        url: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+$/),
+        port: expect.any(Number),
+        dashboardDistPath: expect.stringContaining('review-broker-dashboard/dist'),
+      });
+
+      const baseUrl = dashboardReadyEvent.url as string;
+
+      // Verify the overview API is accessible
+      const apiRes = await fetch(`${baseUrl}/api/overview`);
+      expect(apiRes.status).toBe(200);
+      const snapshot = await apiRes.json();
+      expect(snapshot).toMatchObject({
+        snapshotVersion: expect.any(Number),
+        reviews: expect.objectContaining({ total: 0 }),
+        reviewers: expect.objectContaining({ total: 0 }),
+      });
+
+      // Verify the dashboard page is mounted
+      const pageRes = await fetch(`${baseUrl}/`);
+      expect(pageRes.status).toBe(200);
+      const html = await pageRes.text();
+      expect(html).toContain('Review Broker');
+    } finally {
+      child.kill('SIGTERM');
+      await new Promise<void>((resolve) => {
+        child.on('exit', () => resolve());
+        setTimeout(resolve, 3000);
+      });
     }
   });
 });
