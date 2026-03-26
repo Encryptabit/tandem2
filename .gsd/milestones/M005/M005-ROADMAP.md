@@ -57,16 +57,16 @@ S04 closes with integrated acceptance — full parity proven against a real runt
 
 ## Slices
 
-- [ ] **S01: CLI scaffold and read-only commands** `risk:medium` `depends:[]`
+- [x] **S01: CLI scaffold and read-only commands** `risk:medium` `depends:[]`
   > Demo: `tandem status`, `tandem reviews list`, `tandem reviews show <id>`, `tandem proposal show <id>`, `tandem discussion show <id>`, `tandem activity <id>`, `tandem reviewers list` all produce readable terminal output and support `--json`. Entrypoint, subcommand routing, output formatting, and `--help` proven.
 
-- [ ] **S02: Config management and write commands** `risk:high` `depends:[S01]`
+- [x] **S02: Config management and write commands** `risk:high` `depends:[S01]`
   > Demo: `tandem config set reviewer.provider anthropic`, `tandem config show`, `tandem reviews claim <id>`, `tandem reviews verdict <id>`, `tandem reviews close <id>`, `tandem reviews reclaim <id>`, `tandem discussion add <id>`, `tandem proposal accept <id>`, `tandem proposal reject <id>` all work. Config persists to the resolved config path.
 
-- [ ] **S03: Create, spawn, kill, and dashboard commands** `risk:medium` `depends:[S01,S02]`
+- [x] **S03: Create, spawn, kill, and dashboard commands** `risk:medium` `depends:[S01,S02]`
   > Demo: `tandem reviews create --diff-file patch.diff --title "..." --description "..."` creates a review. `tandem reviewers spawn --provider anthropic` resolves the configured provider template and starts a reviewer. `tandem reviewers kill <id>` stops one. `tandem dashboard` builds and serves the dashboard.
 
-- [ ] **S04: Integrated acceptance and parity proof** `risk:low` `depends:[S01,S02,S03]`
+- [x] **S04: Integrated acceptance and parity proof** `risk:low` `depends:[S01,S02,S03]`
   > Demo: every CLI command exercised against a real SQLite-backed broker runtime, proving full MCP parity and config coherence across CLI/MCP/dashboard surfaces.
 
 ## Milestone Definition of Done
