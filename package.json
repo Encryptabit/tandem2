@@ -13,7 +13,8 @@
     "broker:dashboard": "corepack pnpm --filter review-broker-dashboard build && corepack pnpm --filter review-broker-server exec tsx src/cli/start-broker.ts --dashboard",
     "broker:mcp": "corepack pnpm --filter review-broker-server exec tsx src/cli/start-mcp.ts",
     "broker:parity": "vitest run packages/review-broker-server/test/end-to-end-standalone-parity.test.ts",
-    "broker:test": "vitest run packages/review-broker-server/test/restart-persistence.test.ts packages/review-broker-server/test/start-broker.smoke.test.ts"
+    "broker:test": "vitest run packages/review-broker-server/test/restart-persistence.test.ts packages/review-broker-server/test/start-broker.smoke.test.ts",
+    "tandem": "corepack pnpm --filter review-broker-server exec tsx src/cli/tandem.ts"
   },
   "devDependencies": {
     "@types/node": "^22.13.10",

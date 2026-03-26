@@ -141,6 +141,10 @@ export function startBroker(options: StartBrokerOptions = {}): StartedBrokerRunt
     rejectStopped = reject;
   });
 
+  // Keep the event loop alive so the process doesn't exit while waiting
+  // for a signal. process.on('SIGINT'/'SIGTERM') alone doesn't ref the loop.
+  const keepAlive = setInterval(() => {}, 2_147_483_647);
+
   const removeSignalHandlers = bindSignalHandlers(options.handleSignals ?? true, () => {
     close();
   });
@@ -151,6 +155,7 @@ export function startBroker(options: StartBrokerOptions = {}): StartedBrokerRunt
     }
 
     closed = true;
+    clearInterval(keepAlive);
     removeSignalHandlers();
 
     void context

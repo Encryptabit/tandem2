@@ -12,7 +12,8 @@
   },
   "bin": {
     "review-broker-server": "./dist/cli/start-broker.js",
-    "review-broker-mcp": "./dist/cli/start-mcp.js"
+    "review-broker-mcp": "./dist/cli/start-mcp.js",
+    "tandem": "./dist/cli/tandem.js"
   },
   "files": [
     "dist",

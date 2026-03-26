@@ -26,6 +26,16 @@ export const CLI_PATH = path.join(
   'start-broker.ts',
 );
 
+/** Absolute path to the tandem CLI entrypoint (TypeScript source). */
+export const TANDEM_CLI_PATH = path.join(
+  WORKTREE_ROOT,
+  'packages',
+  'review-broker-server',
+  'src',
+  'cli',
+  'tandem.ts',
+);
+
 /** Absolute path to the tsx binary in the workspace. */
 export const TSX_PATH = path.join(WORKTREE_ROOT, 'node_modules', '.bin', 'tsx');
 
