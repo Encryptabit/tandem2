@@ -19,6 +19,6 @@
   },
   "dependencies": {
     "review-broker-core": "workspace:*",
-    "review-broker-server": "workspace:*"
+    "tandem2": "workspace:*"
   }
 }

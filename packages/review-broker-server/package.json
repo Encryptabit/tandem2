@@ -1,6 +1,7 @@
 {
-  "name": "review-broker-server",
+  "name": "tandem2",
   "version": "0.1.0",
+  "description": "Code review broker — CLI, MCP server, and dashboard for managing AI-assisted code reviews",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -11,30 +12,50 @@
     }
   },
   "bin": {
-    "review-broker-server": "./dist/cli/start-broker.js",
-    "review-broker-mcp": "./dist/cli/start-mcp.js",
-    "tandem": "./dist/cli/tandem.js"
+    "tandem": "./dist/cli/tandem.js",
+    "tandem-broker": "./dist/cli/start-broker.js",
+    "tandem-mcp": "./dist/cli/start-mcp.js"
   },
   "files": [
     "dist",
     "src/db/migrations"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsup && tsc -p tsconfig.build.json --emitDeclarationOnly && node scripts/fix-shebangs.mjs",
+    "build:tsc": "tsc -p tsconfig.build.json",
+    "prepublishOnly": "npm run build",
     "test": "vitest run",
     "start": "tsx src/cli/start-broker.ts",
     "start:once": "tsx src/cli/start-broker.ts --once",
     "start:dashboard": "tsx src/cli/start-broker.ts --dashboard",
     "start:mcp": "tsx src/cli/start-mcp.ts"
   },
+  "keywords": [
+    "code-review",
+    "broker",
+    "mcp",
+    "cli",
+    "ai-review",
+    "tandem"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cari/tandem2.git",
+    "directory": "packages/review-broker-server"
+  },
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.18.1",
     "better-sqlite3": "^11.10.0",
     "parse-diff": "^0.11.1",
-    "review-broker-core": "workspace:*",
     "zod": "^3.25.0"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.12"
+    "@types/better-sqlite3": "^7.6.12",
+    "review-broker-core": "workspace:*",
+    "tsup": "^8.5.1"
   }
 }

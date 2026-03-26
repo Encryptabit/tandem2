@@ -460,6 +460,10 @@ async function handleReviewsCreate(
   const author = requireFlag(args, '--author', 'reviews create');
   const diffFile = requireFlag(args, '--diff-file', 'reviews create');
   const priority = extractFlagWithEquals(args, '--priority');
+  const validPriorities = ['low', 'normal', 'high', 'urgent'] as const;
+  if (priority && !(validPriorities as readonly string[]).includes(priority)) {
+    throw new Error(`Invalid priority "${priority}" — must be one of: ${validPriorities.join(', ')}`);
+  }
 
   const resolvedPath = path.resolve(diffFile);
   let diff: string;
@@ -474,7 +478,7 @@ async function handleReviewsCreate(
     description,
     diff,
     authorId: author,
-    ...(priority ? { priority } : {}),
+    priority: (priority as (typeof validPriorities)[number]) ?? 'normal',
   });
 
   if (options.json) {

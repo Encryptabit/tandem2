@@ -170,7 +170,13 @@ function ensureDatabaseDirectory(dbPath: string): void {
 function resolveMigrationsDirectory(): string {
   const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
   const candidates = [
+    // tsc output: dist/db/ → dist/db/migrations
     path.join(moduleDirectory, 'migrations'),
+    // tsc output from dist/db/ → src/db/migrations
+    path.join(moduleDirectory, '../../src/db/migrations'),
+    // bundled (flat dist/): dist/ → src/db/migrations
+    path.join(moduleDirectory, '../src/db/migrations'),
+    // bundled (dist/cli/): → src/db/migrations
     path.join(moduleDirectory, '../../src/db/migrations'),
   ];
 

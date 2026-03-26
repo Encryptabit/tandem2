@@ -1,5 +1,5 @@
-import type { StartBrokerOptions, StartedBrokerRuntime } from 'review-broker-server';
-import { startBroker } from 'review-broker-server';
+import type { StartBrokerOptions, StartedBrokerRuntime } from 'tandem2';
+import { startBroker } from 'tandem2';
 
 import { createBrokerClient, type BrokerClient, type BrokerServiceLike } from './client.js';
 
