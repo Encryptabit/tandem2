@@ -1,59 +1,80 @@
 # M005: Interactive operator CLI
 
-**Vision:** Give operators a direct subcommand-style CLI (`tandem`) for common broker tasks — listing reviews, inspecting status, managing config, spawning reviewers by provider name, and launching the dashboard — without starting a server or opening a browser.
+**Vision:** Ship a `tandem` CLI with full feature parity to the MCP surface — every broker operation available as a terminal subcommand — plus config management, provider-based reviewer spawning, and dashboard launch as operator conveniences.
 
 ## Success Criteria
 
-- Operators can run `tandem` from any directory inside the workspace and interact with the broker through readable subcommands.
-- `tandem reviews list`, `tandem reviews show <id>`, and `tandem status` display broker state in a human-readable terminal format.
-- `tandem config` lets operators read and write broker configuration (reviewer provider settings, default parameters) to a persistent config file.
-- `tandem reviewer spawn` can resolve a configured provider name into the actual command/args, so operators don't need to remember raw subprocess invocations.
-- `tandem dashboard` builds and starts the dashboard from the CLI as a convenience command.
-- The CLI shares the same default database as the MCP server and dashboard — all surfaces see the same state.
+- Every MCP tool has a corresponding CLI subcommand with equivalent functionality.
+- Operators can run `tandem` from any directory inside the workspace and get readable terminal output for all broker operations.
+- `tandem config` lets operators persist and inspect broker configuration (reviewer provider settings, default parameters).
+- `tandem reviewer spawn --provider <name>` resolves a configured provider into the actual subprocess command.
+- `tandem dashboard` builds and launches the dashboard as a convenience.
+- The CLI shares the same default database as the MCP server and dashboard — all three surfaces see identical state.
+- Output is human-readable for interactive use and machine-parseable (via `--json` flag) for scripting.
 
 ## Key Risks / Unknowns
 
-- **Config schema design:** No config file exists today. The `configPath` is resolved but never read. Defining what goes in config (providers, defaults, etc.) is new design work.
-- **Provider abstraction:** Translating a provider name like "anthropic" into a reviewer spawn command requires a template/registry concept that doesn't exist yet.
-- **Binary distribution:** Making `tandem` runnable as a global command (vs. `pnpm exec`) affects packaging but isn't required for the first milestone.
-- **Output formatting:** Terminal output needs to be readable without being over-engineered. Tables, colors, and formatting are scope-creep magnets.
+- **Config schema design:** No config file exists today. The `configPath` is resolved but never read/written. Defining what goes in config is new design work.
+- **Provider abstraction:** Translating a provider name into a reviewer spawn command requires a template/registry concept that doesn't exist yet.
+- **Diff input for `reviews create`:** The MCP `create_review` takes a diff string. The CLI needs a practical way to accept diffs (file path, stdin pipe, or interactive).
+- **Output formatting:** Needs to be readable without over-engineering. Tables for lists, structured detail for show commands, `--json` for machine consumption.
+- **Binary distribution:** Making `tandem` runnable globally affects packaging but isn't required for the first iteration — `pnpm exec tandem` is fine initially.
+
+## MCP ↔ CLI Parity Map
+
+| MCP Tool | CLI Command | Notes |
+|---|---|---|
+| — | `tandem status` | Maps to `inspectBrokerRuntime`, not an MCP tool |
+| `create_review` | `tandem reviews create` | Diff via `--diff-file` or stdin |
+| `list_reviews` | `tandem reviews list [--status X]` | |
+| `get_review_status` | `tandem reviews show <id>` | |
+| `claim_review` | `tandem reviews claim <id>` | |
+| `reclaim_review` | `tandem reviews reclaim <id>` | |
+| `submit_verdict` | `tandem reviews verdict <id> --verdict approved\|changes_requested` | |
+| `close_review` | `tandem reviews close <id>` | |
+| `get_proposal` | `tandem proposal show <id>` | |
+| `accept_counter_patch` | `tandem proposal accept <id>` | |
+| `reject_counter_patch` | `tandem proposal reject <id>` | |
+| `get_discussion` | `tandem discussion show <id>` | |
+| `add_message` | `tandem discussion add <id>` | Body via `--body` or stdin |
+| `get_activity_feed` | `tandem activity <id>` | |
+| `spawn_reviewer` | `tandem reviewers spawn` | `--provider <name>` or explicit `--command` |
+| `list_reviewers` | `tandem reviewers list [--status X]` | |
+| `kill_reviewer` | `tandem reviewers kill <id>` | |
+| — | `tandem config show` | New — display current config |
+| — | `tandem config set <key> <value>` | New — persist config changes |
+| — | `tandem dashboard` | New — build + launch dashboard |
 
 ## Decomposition Rationale
 
-S01 ships the CLI scaffold and the most immediately useful read-only commands (status, reviews list/show) because those are pure composition over existing BrokerService methods with zero new backend work. This proves the CLI architecture and gives operators something useful immediately.
+S01 ships the CLI entrypoint, subcommand router, output formatting, and all read-only commands. This is the largest slice by command count but lowest risk because every command is pure composition over existing BrokerService methods — no new backend work. Proving the scaffold with reads first means S02/S03 only add incremental commands to a working CLI.
 
-S02 adds config management — the novel piece that requires defining the config schema, reading/writing the config file, and wiring it into the path resolution system. This unblocks provider-based reviewer spawning.
+S02 adds config management (the novel backend piece) and the write commands that don't depend on config (claim, close, verdict, add_message, reclaim, counter-patch). This separates the config design risk from the CLI scaffolding risk.
 
-S03 adds the action commands (reviews create, reviewer spawn with provider resolution, dashboard launch) that depend on config existing. These are the commands that actually change broker state or start processes.
+S03 adds the commands that depend on config or external processes: `reviews create` (diff input), `reviewers spawn` (provider resolution), `reviewers kill`, and `dashboard` launch. These are the operationally riskiest commands.
 
-S04 closes the milestone with integrated acceptance — proving the full CLI surface works against a real broker runtime, the config persists and affects behavior, and the CLI/dashboard/MCP surfaces stay coherent.
+S04 closes with integrated acceptance — full parity proven against a real runtime.
 
 ## Slices
 
 - [ ] **S01: CLI scaffold and read-only commands** `risk:medium` `depends:[]`
-  > Demo: operator runs `tandem status` and `tandem reviews list` from the workspace root and sees formatted broker state in the terminal.
+  > Demo: `tandem status`, `tandem reviews list`, `tandem reviews show <id>`, `tandem proposal show <id>`, `tandem discussion show <id>`, `tandem activity <id>`, `tandem reviewers list` all produce readable terminal output and support `--json`. Entrypoint, subcommand routing, output formatting, and `--help` proven.
 
-- [ ] **S02: Config management and provider registry** `risk:high` `depends:[S01]`
-  > Demo: operator runs `tandem config set reviewer.provider anthropic` and `tandem config show` to persist and inspect reviewer provider settings.
+- [ ] **S02: Config management and write commands** `risk:high` `depends:[S01]`
+  > Demo: `tandem config set reviewer.provider anthropic`, `tandem config show`, `tandem reviews claim <id>`, `tandem reviews verdict <id>`, `tandem reviews close <id>`, `tandem reviews reclaim <id>`, `tandem discussion add <id>`, `tandem proposal accept <id>`, `tandem proposal reject <id>` all work. Config persists to the resolved config path.
 
-- [ ] **S03: Action commands and provider-based spawning** `risk:medium` `depends:[S01,S02]`
-  > Demo: operator runs `tandem reviewer spawn --provider anthropic` and a reviewer process starts using the configured provider command template. `tandem dashboard` launches the dashboard.
+- [ ] **S03: Create, spawn, kill, and dashboard commands** `risk:medium` `depends:[S01,S02]`
+  > Demo: `tandem reviews create --diff-file patch.diff --title "..." --description "..."` creates a review. `tandem reviewers spawn --provider anthropic` resolves the configured provider template and starts a reviewer. `tandem reviewers kill <id>` stops one. `tandem dashboard` builds and serves the dashboard.
 
-- [ ] **S04: Integrated acceptance** `risk:low` `depends:[S01,S02,S03]`
-  > Demo: full CLI surface exercised against a real broker runtime — status, config, review lifecycle, provider spawning, and dashboard launch all work coherently with the same database.
-
-## Requirement Coverage
-
-| Requirement | M005 disposition |
-|---|---|
-| R011 | strengthened — CLI provides another operator-facing surface backed by the same broker state |
-| R005 | strengthened — reviewer spawning by provider name improves operator ergonomics |
-| R014 | partially advanced — CLI review commands complement dashboard browsing |
+- [ ] **S04: Integrated acceptance and parity proof** `risk:low` `depends:[S01,S02,S03]`
+  > Demo: every CLI command exercised against a real SQLite-backed broker runtime, proving full MCP parity and config coherence across CLI/MCP/dashboard surfaces.
 
 ## Milestone Definition of Done
 
-- The `tandem` CLI is runnable from the workspace and provides subcommands for status, reviews, config, reviewer management, and dashboard launch.
-- Config management reads/writes a persistent config file at the resolved config path.
-- Provider-based reviewer spawning resolves configured provider templates into real spawn commands.
-- The CLI shares the same default database as MCP and dashboard.
-- All commands are tested and proven against a real broker runtime.
+- Every MCP tool has a working CLI equivalent producing correct output.
+- `--json` flag on all commands enables machine-parseable output.
+- Config management reads and writes the broker config file at the resolved path.
+- Provider-based reviewer spawning resolves configured templates into real subprocess commands.
+- `tandem dashboard` launches the broker-served dashboard.
+- The CLI, MCP server, and dashboard all share the same default database.
+- Full parity proven through integrated tests against a real broker runtime.
