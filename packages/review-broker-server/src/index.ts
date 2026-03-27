@@ -17,6 +17,8 @@ import type {
 } from './runtime/broker-service.js';
 import { createBrokerService } from './runtime/broker-service.js';
 import type { ReviewerShutdownSummary } from './runtime/reviewer-manager.js';
+import type { PoolManager } from './runtime/reviewer-pool.js';
+import { createPoolManager } from './runtime/reviewer-pool.js';
 
 export * from './db/audit-repository.js';
 export * from './db/messages-repository.js';
@@ -30,9 +32,21 @@ export * from './runtime/broker-service.js';
 export * from './runtime/diff.js';
 export * from './runtime/path-resolution.js';
 export * from './runtime/reviewer-manager.js';
+export * from './runtime/reviewer-pool.js';
+export * from './runtime/pool-config.js';
+export * from './runtime/jsonl-log-writer.js';
+export * from './agent/reviewer-agent.js';
+export * from './agent/reviewer-prompt.js';
+export * from './agent/reviewer-tools.js';
 
 export interface StartBrokerOptions extends CreateAppContextOptions, CreateBrokerServiceOptions {
   handleSignals?: boolean;
+  /** Command used to spawn pool reviewer processes. Required when poolConfig is set. */
+  poolSpawnCommand?: string;
+  /** Arguments for the pool reviewer spawn command. */
+  poolSpawnArgs?: string[];
+  /** Directory for pool reviewer log files. */
+  poolLogDir?: string;
 }
 
 export interface BrokerRuntimeLatestReviewSnapshot {
@@ -116,14 +130,22 @@ export interface BrokerShutdownSnapshot {
   reviewerShutdown: ReviewerShutdownSummary;
 }
 
+export interface PoolStartupRecoverySnapshot {
+  terminatedReviewerIds: string[];
+  reclaimedReviewIds: string[];
+  scalingTriggered: boolean;
+}
+
 export interface StartedBrokerRuntime {
   context: AppContext;
   service: BrokerService;
   startedAt: string;
+  poolManager: PoolManager | null;
   close: () => void;
   waitUntilStopped: () => Promise<void>;
   getShutdownSnapshot: () => BrokerShutdownSnapshot | null;
   getStartupRecoverySnapshot: () => BrokerStartupRecoverySnapshot;
+  getPoolStartupRecoverySnapshot: () => PoolStartupRecoverySnapshot | null;
 }
 
 export function startBroker(options: StartBrokerOptions = {}): StartedBrokerRuntime {
@@ -131,6 +153,41 @@ export function startBroker(options: StartBrokerOptions = {}): StartedBrokerRunt
   const service = createBrokerService(context, options);
   const startupRecovery = reconcileStartupRecovery(context, options.now);
   const startedAt = options.now ? options.now() : new Date().toISOString();
+
+  // Create pool manager if pool configuration is present and spawn command is provided
+  let poolManager: PoolManager | null = null;
+  let poolRecovery: PoolStartupRecoverySnapshot | null = null;
+  if (context.poolConfig !== null) {
+    const spawnCommand = options.poolSpawnCommand ?? process.execPath;
+    const spawnArgs = options.poolSpawnArgs ?? [];
+
+    poolManager = createPoolManager({
+      reviewerManager: context.reviewerManager,
+      reviewers: context.reviewers,
+      reviews: context.reviews,
+      audit: context.audit,
+      poolConfig: context.poolConfig,
+      notifications: context.notifications,
+      spawnCommand,
+      spawnArgs,
+      ...(options.poolLogDir !== undefined ? { logDir: options.poolLogDir } : {}),
+      ...(options.now !== undefined ? { now: options.now } : {}),
+    });
+
+    // Wire pool manager into broker service for reactive scaling triggers
+    service._setPoolManager(poolManager);
+
+    // Recover stale-session reviewers from previous broker sessions before starting background loop
+    poolRecovery = poolStartupRecovery(context, poolManager, options.now);
+
+    // Fire-and-forget reactive scaling to replace terminated stale-session reviewers.
+    // This is async but startBroker() is synchronous — use setImmediate to avoid blocking.
+    setImmediate(() => {
+      poolManager.reactiveScale().catch(() => {});
+    });
+
+    poolManager.startBackgroundLoop();
+  }
 
   let closed = false;
   let shutdownSnapshot: BrokerShutdownSnapshot | null = null;
@@ -158,6 +215,11 @@ export function startBroker(options: StartBrokerOptions = {}): StartedBrokerRunt
     clearInterval(keepAlive);
     removeSignalHandlers();
 
+    // Stop pool background loop before shutting down context
+    if (poolManager) {
+      poolManager.stopBackgroundLoop();
+    }
+
     void context
       .shutdown()
       .then((reviewerShutdown) => {
@@ -176,10 +238,12 @@ export function startBroker(options: StartBrokerOptions = {}): StartedBrokerRunt
     context,
     service,
     startedAt,
+    poolManager,
     close,
     waitUntilStopped: () => stopped,
     getShutdownSnapshot: () => shutdownSnapshot,
     getStartupRecoverySnapshot: () => startupRecovery,
+    getPoolStartupRecoverySnapshot: () => poolRecovery,
   };
 }
 
@@ -248,6 +312,78 @@ function reconcileStartupRecovery(
     staleReviewIds: reviewerSummaries.flatMap((reviewer) => reviewer.staleReviewIds),
     unrecoverableReviewIds: reviewerSummaries.flatMap((reviewer) => reviewer.unrecoverableReviewIds),
     reviewers: reviewerSummaries,
+  };
+}
+
+function poolStartupRecovery(
+  context: AppContext,
+  poolManager: PoolManager,
+  nowFactory?: (() => string) | undefined,
+): PoolStartupRecoverySnapshot {
+  const now = nowFactory ?? (() => new Date().toISOString());
+  const currentSessionToken = poolManager.getSessionToken();
+  const allReviewers = context.reviewers.list();
+
+  // Find reviewers from a previous pool session: have a session token, not offline, different session
+  const staleReviewers = allReviewers
+    .filter(
+      (reviewer) =>
+        reviewer.offlineAt === null &&
+        reviewer.sessionToken !== null &&
+        reviewer.sessionToken !== currentSessionToken,
+    )
+    .sort((left, right) => left.reviewerId.localeCompare(right.reviewerId));
+
+  const terminatedReviewerIds: string[] = [];
+  const reclaimedReviewIds: string[] = [];
+
+  for (const staleReviewer of staleReviewers) {
+    const offlineAt = now();
+    const marked = context.reviewers.markOffline({
+      reviewerId: staleReviewer.reviewerId,
+      offlineAt,
+      offlineReason: 'startup_recovery',
+      exitCode: staleReviewer.exitCode,
+      exitSignal: staleReviewer.exitSignal,
+      lastSeenAt: staleReviewer.lastSeenAt ?? offlineAt,
+      updatedAt: offlineAt,
+    });
+
+    if (!marked) {
+      continue;
+    }
+
+    terminatedReviewerIds.push(staleReviewer.reviewerId);
+
+    const recovery = recoverReviewerAssignmentsSynchronously(context, {
+      reviewerId: staleReviewer.reviewerId,
+      cause: 'startup_recovery',
+      now,
+    });
+
+    reclaimedReviewIds.push(...recovery.reclaimedReviewIds);
+
+    context.audit.append({
+      eventType: 'pool.stale_session_terminated',
+      createdAt: offlineAt,
+      metadata: {
+        reviewerId: staleReviewer.reviewerId,
+        staleSessionToken: staleReviewer.sessionToken,
+        currentSessionToken,
+        reclaimedReviewIds: recovery.reclaimedReviewIds,
+        staleReviewIds: recovery.staleReviewIds,
+        unrecoverableReviewIds: recovery.unrecoverableReviewIds,
+        summary: `Stale-session reviewer ${staleReviewer.reviewerId} terminated during pool startup recovery (session ${staleReviewer.sessionToken} → ${currentSessionToken}).`,
+      },
+    });
+
+    context.notifications.notify('reviewer-state');
+  }
+
+  return {
+    terminatedReviewerIds,
+    reclaimedReviewIds,
+    scalingTriggered: staleReviewers.length > 0,
   };
 }
 

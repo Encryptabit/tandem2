@@ -96,11 +96,13 @@ describe('review-broker-server restart persistence', () => {
       '001_init',
       '002_review_lifecycle_parity',
       '003_reviewer_lifecycle',
+      '004_pool_management',
     ]);
     expect(schemaMigrations).toEqual([
       { id: '001_init' },
       { id: '002_review_lifecycle_parity' },
       { id: '003_reviewer_lifecycle' },
+      { id: '004_pool_management' },
     ]);
     expect(reopenedStatus.review).toMatchObject({
       reviewId: created.review.reviewId,

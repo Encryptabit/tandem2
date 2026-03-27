@@ -38,15 +38,15 @@ export const REVIEW_PRIORITIES = ['low', 'normal', 'high', 'urgent'] as const;
 
 export type ReviewPriority = (typeof REVIEW_PRIORITIES)[number];
 
-export const REVIEWER_STATUSES = ['idle', 'assigned', 'offline'] as const;
+export const REVIEWER_STATUSES = ['idle', 'assigned', 'draining', 'offline'] as const;
 
 export type ReviewerStatus = (typeof REVIEWER_STATUSES)[number];
 
-export const REVIEWER_OFFLINE_REASONS = ['spawn_failed', 'reviewer_exit', 'operator_kill', 'startup_recovery'] as const;
+export const REVIEWER_OFFLINE_REASONS = ['spawn_failed', 'reviewer_exit', 'operator_kill', 'startup_recovery', 'idle_timeout', 'ttl_expired', 'pool_drain'] as const;
 
 export type ReviewerOfflineReason = (typeof REVIEWER_OFFLINE_REASONS)[number];
 
-export const REVIEW_RECLAIM_CAUSES = ['reviewer_exit', 'operator_kill', 'startup_recovery'] as const;
+export const REVIEW_RECLAIM_CAUSES = ['reviewer_exit', 'operator_kill', 'startup_recovery', 'idle_timeout', 'ttl_expired', 'pool_drain'] as const;
 
 export type ReviewReclaimCause = (typeof REVIEW_RECLAIM_CAUSES)[number];
 
@@ -58,6 +58,17 @@ export const REVIEWER_AUDIT_EVENT_TYPES = [
 ] as const;
 
 export type ReviewerAuditEventType = (typeof REVIEWER_AUDIT_EVENT_TYPES)[number];
+
+export const POOL_AUDIT_EVENT_TYPES = [
+  'pool.scale_up',
+  'pool.drain_initiated',
+  'pool.drain_completed',
+  'pool.dead_process_reaped',
+  'pool.claim_timeout',
+  'pool.stale_session_terminated',
+] as const;
+
+export type PoolAuditEventType = (typeof POOL_AUDIT_EVENT_TYPES)[number];
 
 export const AUDIT_EVENT_TYPES = [
   'review.created',
@@ -74,6 +85,7 @@ export const AUDIT_EVENT_TYPES = [
   'review.transition_rejected',
   'review.diff_rejected',
   ...REVIEWER_AUDIT_EVENT_TYPES,
+  ...POOL_AUDIT_EVENT_TYPES,
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
@@ -155,6 +167,8 @@ export interface ReviewerRecord {
   offlineReason: ReviewerOfflineReason | null;
   exitCode: number | null;
   exitSignal: string | null;
+  sessionToken: string | null;
+  drainingAt: string | null;
   createdAt: string;
   updatedAt: string;
 }

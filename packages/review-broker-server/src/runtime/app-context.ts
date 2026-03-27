@@ -15,6 +15,8 @@ import type { ReviewerManager, ReviewerShutdownSummary } from './reviewer-manage
 import { createReviewerManager } from './reviewer-manager.js';
 import type { ResolveBrokerPathsOptions } from './path-resolution.js';
 import { resolveBrokerPaths } from './path-resolution.js';
+import type { PoolConfig } from './pool-config.js';
+import { loadPoolConfig } from './pool-config.js';
 
 export interface CreateAppContextOptions extends ResolveBrokerPathsOptions {
   busyTimeoutMs?: number;
@@ -36,6 +38,7 @@ export interface AppContext {
   messages: MessagesRepository;
   audit: AuditRepository;
   reviewerManager: ReviewerManager;
+  poolConfig: PoolConfig | null;
   close: () => void;
   shutdown: () => Promise<ReviewerShutdownSummary>;
 }
@@ -56,6 +59,7 @@ export function createAppContext(options: CreateAppContextOptions = {}): AppCont
     workspaceRoot: resolved.workspaceRoot,
     notifications,
   });
+  const poolConfig = loadPoolConfig(resolved.configPath);
 
   let closingState: 'open' | 'closing' | 'closed' = 'open';
   let shutdownPromise: Promise<ReviewerShutdownSummary> | null = null;
@@ -75,6 +79,7 @@ export function createAppContext(options: CreateAppContextOptions = {}): AppCont
     messages: createMessagesRepository(opened.db),
     audit,
     reviewerManager,
+    poolConfig,
     close: () => {
       if (shutdownPromise || closingState === 'closed') {
         return;

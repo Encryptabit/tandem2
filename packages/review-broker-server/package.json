@@ -48,6 +48,8 @@
     "node": ">=20"
   },
   "dependencies": {
+    "@gsd/pi-agent-core": "link:/home/cari/.nvm/versions/node/v22.19.0/lib/node_modules/gsd-pi/packages/pi-agent-core",
+    "@gsd/pi-ai": "link:/home/cari/.nvm/versions/node/v22.19.0/lib/node_modules/gsd-pi/packages/pi-ai",
     "@modelcontextprotocol/sdk": "^1.18.1",
     "better-sqlite3": "^11.10.0",
     "parse-diff": "^0.11.1",

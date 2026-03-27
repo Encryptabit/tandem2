@@ -16,6 +16,7 @@ export default defineConfig([
     sourcemap: true,
     dts: false,
     noExternal: ['review-broker-core'],
+    external: ['@gsd/pi-agent-core', '@gsd/pi-ai'],
   },
   {
     entry: { index: 'src/index.ts' },
@@ -27,5 +28,6 @@ export default defineConfig([
     sourcemap: true,
     dts: false,
     noExternal: ['review-broker-core'],
+    external: ['@gsd/pi-agent-core', '@gsd/pi-ai'],
   },
 ]);

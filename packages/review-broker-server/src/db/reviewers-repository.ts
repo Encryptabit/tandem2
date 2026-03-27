@@ -13,6 +13,8 @@ interface ReviewerRow {
   offline_reason: ReviewerOfflineReason | null;
   exit_code: number | null;
   exit_signal: string | null;
+  session_token: string | null;
+  draining_at: string | null;
   created_at: string;
   updated_at: string;
   current_review_id: string | null;
@@ -27,6 +29,7 @@ export interface RecordReviewerSpawnedInput {
   pid: number;
   startedAt: string;
   lastSeenAt?: string | null;
+  sessionToken?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -57,6 +60,12 @@ export interface TouchReviewerInput {
   updatedAt: string;
 }
 
+export interface MarkReviewerDrainingInput {
+  reviewerId: string;
+  drainingAt: string;
+  updatedAt: string;
+}
+
 export interface ListReviewersOptions {
   status?: ReviewerStatus;
   limit?: number;
@@ -66,6 +75,7 @@ export interface ReviewersRepository {
   recordSpawned: (input: RecordReviewerSpawnedInput) => ReviewerRecord;
   recordSpawnFailure: (input: RecordReviewerSpawnFailureInput) => ReviewerRecord;
   markOffline: (input: MarkReviewerOfflineInput) => ReviewerRecord | null;
+  markDraining: (input: MarkReviewerDrainingInput) => ReviewerRecord | null;
   touch: (input: TouchReviewerInput) => ReviewerRecord | null;
   getById: (reviewerId: string) => ReviewerRecord | null;
   list: (options?: ListReviewersOptions) => ReviewerRecord[];
@@ -83,6 +93,8 @@ const REVIEWER_SELECT_COLUMNS = `
   offline_reason,
   exit_code,
   exit_signal,
+  session_token,
+  draining_at,
   created_at,
   updated_at,
   current_review_id,
@@ -103,6 +115,8 @@ const REVIEWER_STATE_CTE = `
       reviewers.offline_reason,
       reviewers.exit_code,
       reviewers.exit_signal,
+      reviewers.session_token,
+      reviewers.draining_at,
       reviewers.created_at,
       reviewers.updated_at,
       (
@@ -115,6 +129,7 @@ const REVIEWER_STATE_CTE = `
       ) AS current_review_id,
       CASE
         WHEN reviewers.pid IS NULL OR reviewers.offline_at IS NOT NULL THEN 'offline'
+        WHEN reviewers.draining_at IS NOT NULL THEN 'draining'
         WHEN EXISTS (
           SELECT 1
           FROM reviews
@@ -142,6 +157,7 @@ export function createReviewersRepository(db: Database.Database): ReviewersRepos
       offline_reason,
       exit_code,
       exit_signal,
+      session_token,
       created_at,
       updated_at
     ) VALUES (
@@ -156,6 +172,7 @@ export function createReviewersRepository(db: Database.Database): ReviewersRepos
       NULL,
       NULL,
       NULL,
+      @sessionToken,
       @createdAt,
       @updatedAt
     )
@@ -170,6 +187,7 @@ export function createReviewersRepository(db: Database.Database): ReviewersRepos
       offline_reason = NULL,
       exit_code = NULL,
       exit_signal = NULL,
+      session_token = excluded.session_token,
       updated_at = excluded.updated_at
   `);
 
@@ -239,6 +257,7 @@ export function createReviewersRepository(db: Database.Database): ReviewersRepos
         pid: input.pid,
         startedAt: input.startedAt,
         lastSeenAt: input.lastSeenAt ?? input.startedAt,
+        sessionToken: input.sessionToken ?? null,
         createdAt: input.createdAt,
         updatedAt: input.updatedAt,
       });
@@ -293,6 +312,28 @@ export function createReviewersRepository(db: Database.Database): ReviewersRepos
           offlineReason: input.offlineReason,
           exitCode: input.exitCode ?? null,
           exitSignal: input.exitSignal ?? null,
+          updatedAt: input.updatedAt,
+        });
+
+      if (result.changes === 0) {
+        return null;
+      }
+
+      return getById(input.reviewerId);
+    },
+
+    markDraining(input) {
+      const result = db
+        .prepare(`
+          UPDATE reviewers
+          SET
+            draining_at = @drainingAt,
+            updated_at = @updatedAt
+          WHERE reviewer_id = @reviewerId
+        `)
+        .run({
+          reviewerId: input.reviewerId,
+          drainingAt: input.drainingAt,
           updatedAt: input.updatedAt,
         });
 
@@ -371,6 +412,8 @@ function mapReviewerRow(row: ReviewerRow): ReviewerRecord {
     offlineReason: row.offline_reason,
     exitCode: row.exit_code,
     exitSignal: row.exit_signal,
+    sessionToken: row.session_token,
+    drainingAt: row.draining_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   });

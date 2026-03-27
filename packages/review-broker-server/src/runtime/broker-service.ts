@@ -81,6 +81,7 @@ import {
 import type { StoredReviewMessage } from '../db/messages-repository.js';
 import type { AppContext } from './app-context.js';
 import { DiffValidationError, validateReviewDiff } from './diff.js';
+import type { PoolManager } from './reviewer-pool.js';
 
 const REVIEWS_TOPIC = 'reviews';
 const REVIEW_QUEUE_TOPIC = 'review-queue';
@@ -126,6 +127,8 @@ export interface BrokerService {
   getActivityFeed: (input: GetActivityFeedRequest) => Promise<GetActivityFeedResponse>;
   acceptCounterPatch: (input: AcceptCounterPatchRequest) => Promise<AcceptCounterPatchResponse>;
   rejectCounterPatch: (input: RejectCounterPatchRequest) => Promise<RejectCounterPatchResponse>;
+  /** @internal Wire in pool manager for reactive scaling triggers. */
+  _setPoolManager: (poolManager: PoolManager) => void;
 }
 
 export interface CreateBrokerServiceOptions {
@@ -158,6 +161,17 @@ export function createBrokerService(context: AppContext, options: CreateBrokerSe
   const reviewIdFactory = options.reviewIdFactory ?? (() => `rvw_${randomUUID().replace(/-/g, '')}`);
   const yieldForClaimRace = options.yieldForClaimRace ?? (() => Promise.resolve());
   const yieldForRecoveryRace = options.yieldForRecoveryRace ?? (() => Promise.resolve());
+
+  // Pool manager reference for reactive scaling triggers (set after construction)
+  let poolManagerRef: PoolManager | null = null;
+
+  function triggerReactiveScaling(): void {
+    if (poolManagerRef) {
+      setImmediate(() => {
+        poolManagerRef!.reactiveScale().catch(() => {});
+      });
+    }
+  }
 
   context.reviewerManager.setOfflineHandler(async (event) => {
     const recovery = await recoverReviewerAssignments(context, {
@@ -246,6 +260,9 @@ export function createBrokerService(context: AppContext, options: CreateBrokerSe
       })();
 
       const versions = notifyReviewMutation(context, reviewId);
+
+      // Fire-and-forget reactive scaling — new review demand may require more reviewers
+      triggerReactiveScaling();
 
       return parseWithSchema(CreateReviewResponseSchema, {
         review: toReviewSummary(persistedReview),
@@ -900,6 +917,10 @@ export function createBrokerService(context: AppContext, options: CreateBrokerSe
       })();
 
       const versions = notifyReviewMutation(context, current.reviewId);
+
+      // Fire-and-forget reactive scaling — new messages may signal demand for reviewers
+      triggerReactiveScaling();
+
       return parseWithSchema(AddMessageResponseSchema, {
         review: toReviewSummary(updated.review),
         message: updated.message,
@@ -946,6 +967,10 @@ export function createBrokerService(context: AppContext, options: CreateBrokerSe
         now,
         decision: 'rejected',
       });
+    },
+
+    _setPoolManager(pm: PoolManager) {
+      poolManagerRef = pm;
     },
   };
 }

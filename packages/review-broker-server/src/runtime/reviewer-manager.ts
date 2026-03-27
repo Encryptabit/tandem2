@@ -8,6 +8,7 @@ import { ReviewerRecordSchema } from 'review-broker-core';
 
 import type { AuditRepository } from '../db/audit-repository.js';
 import type { ReviewersRepository } from '../db/reviewers-repository.js';
+import { createJsonlLogWriter, type JsonlLogWriter } from './jsonl-log-writer.js';
 
 export interface ReviewerOfflineHookResult {
   reclaimedReviewIds: string[];
@@ -34,6 +35,7 @@ interface ReviewerManagerDependencies {
 export interface CreateReviewerManagerOptions extends ReviewerManagerDependencies {
   now?: () => string;
   reviewerIdFactory?: () => string;
+  logDir?: string;
 }
 
 export interface SpawnReviewerInput {
@@ -41,6 +43,13 @@ export interface SpawnReviewerInput {
   command: string;
   args?: string[];
   cwd?: string;
+  prompt?: string;
+  logDir?: string;
+  sessionToken?: string;
+}
+
+export interface StopReviewerOptions {
+  offlineReason?: Exclude<ReviewerOfflineReason, 'spawn_failed' | 'startup_recovery'>;
 }
 
 export interface StopReviewerResult {
@@ -61,9 +70,11 @@ export interface ReviewerShutdownSummary {
 
 export interface ReviewerManager {
   spawnReviewer: (input: SpawnReviewerInput) => Promise<ReviewerRecord>;
-  stopReviewer: (reviewerId: string) => Promise<StopReviewerResult>;
+  stopReviewer: (reviewerId: string, options?: StopReviewerOptions) => Promise<StopReviewerResult>;
   shutdown: () => Promise<ReviewerShutdownSummary>;
   inspect: () => ReviewerManagerSnapshot;
+  isProcessAlive: (reviewerId: string) => boolean;
+  getTrackedReviewerIds: () => string[];
   setOfflineHandler: (handler: ((event: ReviewerOfflineEvent) => Promise<ReviewerOfflineHookResult> | ReviewerOfflineHookResult) | null) => void;
   close: () => void;
 }
@@ -76,6 +87,9 @@ interface TrackedReviewerProcess {
   resolveStopped: (reviewer: ReviewerRecord) => void;
   rejectStopped: (error: unknown) => void;
   requestedOfflineReason: Exclude<ReviewerOfflineReason, 'spawn_failed' | 'startup_recovery'> | null;
+  logWriter: JsonlLogWriter | null;
+  stdoutRemainder: string;
+  stderrRemainder: string;
 }
 
 export function createReviewerManager(options: CreateReviewerManagerOptions): ReviewerManager {
@@ -107,7 +121,7 @@ export function createReviewerManager(options: CreateReviewerManagerOptions): Re
     try {
       child = spawn(rawCommand, rawArgs, {
         cwd: resolvedCwd,
-        stdio: 'ignore',
+        stdio: ['pipe', 'pipe', 'pipe'],
       });
     } catch (error) {
       const reviewer = options.reviewers.recordSpawnFailure({
@@ -177,6 +191,51 @@ export function createReviewerManager(options: CreateReviewerManagerOptions): Re
       throw new Error(`Reviewer ${reviewerId} did not expose a pid after spawn.`);
     }
 
+    // Determine log directory and create log writer if configured.
+    const resolvedLogDir = input.logDir ?? options.logDir ?? null;
+    const logWriter = resolvedLogDir
+      ? createJsonlLogWriter({ filePath: path.join(resolvedLogDir, `reviewer-${reviewerId}.jsonl`) })
+      : null;
+
+    // Attach stdout/stderr listeners immediately (before any async yield)
+    // to prevent child process blocking on full pipe buffers.
+    let stdoutRemainder = '';
+    let stderrRemainder = '';
+
+    const makeDataHandler = (stream: 'stdout' | 'stderr') => (chunk: Buffer) => {
+      const text = (stream === 'stdout' ? stdoutRemainder : stderrRemainder) + chunk.toString('utf8');
+      const lines = text.split('\n');
+      // Last element is either '' (if chunk ended with \n) or an incomplete line.
+      const remainder = lines.pop()!;
+      if (stream === 'stdout') {
+        stdoutRemainder = remainder;
+      } else {
+        stderrRemainder = remainder;
+      }
+      for (const line of lines) {
+        if (line.length > 0) {
+          logWriter?.write({
+            ts: new Date().toISOString(),
+            reviewerId,
+            stream,
+            message: line,
+          });
+        }
+      }
+    };
+
+    child.stdout!.on('data', makeDataHandler('stdout'));
+    child.stderr!.on('data', makeDataHandler('stderr'));
+
+    // Handle stdin: pipe prompt if provided, then close.
+    if (input.prompt != null) {
+      child.stdin!.write(input.prompt, () => {
+        child.stdin!.end();
+      });
+    } else {
+      child.stdin!.end();
+    }
+
     const startedAt = now();
     let resolveStopped!: (reviewer: ReviewerRecord) => void;
     let rejectStopped!: (error: unknown) => void;
@@ -197,9 +256,33 @@ export function createReviewerManager(options: CreateReviewerManagerOptions): Re
       resolveStopped,
       rejectStopped,
       requestedOfflineReason: null,
+      logWriter,
+      stdoutRemainder: '',
+      stderrRemainder: '',
     };
 
     const handleExit = (exitCode: number | null, exitSignal: NodeJS.Signals | null): void => {
+      // Flush any buffered partial lines before closing the log writer.
+      if (stdoutRemainder.length > 0) {
+        logWriter?.write({
+          ts: new Date().toISOString(),
+          reviewerId,
+          stream: 'stdout',
+          message: stdoutRemainder,
+        });
+        stdoutRemainder = '';
+      }
+      if (stderrRemainder.length > 0) {
+        logWriter?.write({
+          ts: new Date().toISOString(),
+          reviewerId,
+          stream: 'stderr',
+          message: stderrRemainder,
+        });
+        stderrRemainder = '';
+      }
+      trackedEntry.logWriter?.close();
+
       void (async () => {
         try {
           const offlineAt = now();
@@ -274,6 +357,7 @@ export function createReviewerManager(options: CreateReviewerManagerOptions): Re
         pid,
         startedAt,
         lastSeenAt: startedAt,
+        sessionToken: input.sessionToken ?? null,
         createdAt,
         updatedAt: startedAt,
       });
@@ -300,7 +384,7 @@ export function createReviewerManager(options: CreateReviewerManagerOptions): Re
     }
   }
 
-  async function stopReviewer(reviewerId: string): Promise<StopReviewerResult> {
+  async function stopReviewer(reviewerId: string, stopOptions?: StopReviewerOptions): Promise<StopReviewerResult> {
     const trackedEntry = tracked.get(reviewerId);
 
     if (!trackedEntry) {
@@ -318,7 +402,7 @@ export function createReviewerManager(options: CreateReviewerManagerOptions): Re
       };
     }
 
-    trackedEntry.requestedOfflineReason = 'operator_kill';
+    trackedEntry.requestedOfflineReason = stopOptions?.offlineReason ?? 'operator_kill';
     const killedAt = now();
     options.audit.append({
       eventType: 'reviewer.killed',
@@ -386,6 +470,7 @@ export function createReviewerManager(options: CreateReviewerManagerOptions): Re
 
   function close(): void {
     for (const entry of [...tracked.values()]) {
+      entry.logWriter?.close();
       entry.cleanup();
 
       if (entry.child.exitCode === null && entry.child.signalCode === null) {
@@ -394,11 +479,23 @@ export function createReviewerManager(options: CreateReviewerManagerOptions): Re
     }
   }
 
+  function isProcessAlive(reviewerId: string): boolean {
+    const entry = tracked.get(reviewerId);
+    if (!entry) return false;
+    return entry.child.exitCode === null && entry.child.signalCode === null;
+  }
+
+  function getTrackedReviewerIds(): string[] {
+    return [...tracked.keys()];
+  }
+
   return {
     spawnReviewer,
     stopReviewer,
     shutdown,
     inspect,
+    isProcessAlive,
+    getTrackedReviewerIds,
     setOfflineHandler,
     close,
   };

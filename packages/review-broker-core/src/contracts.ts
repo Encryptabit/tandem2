@@ -135,6 +135,8 @@ export const ReviewerRecordSchema = z
     offlineReason: ReviewerOfflineReasonSchema.nullable(),
     exitCode: z.number().int().nullable(),
     exitSignal: z.string().min(1).nullable(),
+    sessionToken: z.string().min(1).nullable(),
+    drainingAt: IsoDateTimeSchema.nullable(),
     createdAt: IsoDateTimeSchema,
     updatedAt: IsoDateTimeSchema,
   })

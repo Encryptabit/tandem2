@@ -126,6 +126,7 @@ export interface ReviewsRepository {
   insert: (input: InsertReviewInput) => ReviewRecord;
   getById: (reviewId: string) => ReviewRecord | null;
   list: (options?: ListReviewsOptions) => ReviewSummary[];
+  countByStatus: (status: ReviewStatus) => number;
   updateState: (input: UpdateReviewStateInput) => ReviewRecord | null;
   recordVerdict: (input: RecordVerdictInput) => ReviewRecord | null;
   recordCounterPatchDecision: (input: RecordCounterPatchDecisionInput) => ReviewRecord | null;
@@ -384,6 +385,16 @@ export function createReviewsRepository(db: Database.Database): ReviewsRepositor
         .all(params);
 
       return rows.map((row) => mapReviewSummaryRow(row));
+    },
+
+    countByStatus(status) {
+      const row = db
+        .prepare<{ status: ReviewStatus }, { count: number }>(`
+          SELECT COUNT(*) as count FROM reviews WHERE status = @status
+        `)
+        .get({ status });
+
+      return row?.count ?? 0;
     },
 
     updateState(input) {

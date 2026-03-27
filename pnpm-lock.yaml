@@ -47,6 +47,12 @@ importers:
 
   packages/review-broker-server:
     dependencies:
+      '@gsd/pi-agent-core':
+        specifier: link:/home/cari/.nvm/versions/node/v22.19.0/lib/node_modules/gsd-pi/packages/pi-agent-core
+        version: link:../../../../.nvm/versions/node/v22.19.0/lib/node_modules/gsd-pi/packages/pi-agent-core
+      '@gsd/pi-ai':
+        specifier: link:/home/cari/.nvm/versions/node/v22.19.0/lib/node_modules/gsd-pi/packages/pi-ai
+        version: link:../../../../.nvm/versions/node/v22.19.0/lib/node_modules/gsd-pi/packages/pi-ai
       '@modelcontextprotocol/sdk':
         specifier: ^1.18.1
         version: 1.27.1(zod@3.25.76)
