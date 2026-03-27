@@ -1,13 +1,4 @@
-# M007: 
-
-## Vision
-TBD
-
-## Slice Overview
-| ID | Slice | Risk | Depends | Done | After this |
-|----|-------|------|---------|------|------------|
-| S01 | Pi-mono integration and reviewer agent tools | medium | — | ✅ | pnpm vitest run reviewer-agent.test.ts passes — agent executes full review lifecycle |
-| S02 |  | medium | — | ✅ | # S02: M006 pool infrastructure port to M007 — UAT
+# S02: M006 pool infrastructure port to M007 — UAT
 
 **Milestone:** M007
 **Written:** 2026-03-27T01:55:52.187Z
@@ -88,4 +79,3 @@ Run `npx vitest run packages/review-broker-server/test/reviewer-pool.test.ts --e
 ## Notes for Tester
 
 This is a merge/port slice. All test cases verify that existing M006 tests pass in the M007 context. No new behavior was added — the value is coexistence of pool and agent infrastructure on one codebase.
- |
