@@ -182,8 +182,9 @@ export function startBroker(options: StartBrokerOptions = {}): StartedBrokerRunt
 
     // Fire-and-forget reactive scaling to replace terminated stale-session reviewers.
     // This is async but startBroker() is synchronous — use setImmediate to avoid blocking.
+    const pm = poolManager;
     setImmediate(() => {
-      poolManager.reactiveScale().catch(() => {});
+      pm.reactiveScale().catch(() => {});
     });
 
     poolManager.startBackgroundLoop();
