@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { BROKER_OPERATION_MCP_TOOL_NAMES, BROKER_OPERATIONS } from 'review-broker-core';
 
-import { REVIEWER_FIXTURE_PATH, WORKTREE_ROOT } from './test-paths.js';
+import { ABSOLUTE_REVIEWER_FIXTURE_PATH, REVIEWER_FIXTURE_PATH, WORKTREE_ROOT } from './test-paths.js';
 const CLI_PATH = path.join(WORKTREE_ROOT, 'packages', 'review-broker-server', 'src', 'cli', 'start-mcp.ts');
 const TSX_PATH = path.join(WORKTREE_ROOT, 'node_modules', '.bin', 'tsx');
 const tempDirectories: string[] = [];
@@ -89,7 +89,7 @@ describe('review-broker-server MCP stdio surface', () => {
         status: 'idle',
         currentReviewId: null,
         command: path.basename(process.execPath),
-        args: ['packages/review-broker-server/test/fixtures/reviewer-worker.mjs'],
+        args: ['test/fixtures/reviewer-worker.mjs'],
         cwd: 'packages/review-broker-server',
       },
       version: 1,
@@ -136,6 +136,66 @@ describe('review-broker-server MCP stdio surface', () => {
       ],
       version: expect.any(Number),
     });
+  });
+
+  it('keeps reviewer pool disabled in MCP mode even when reviewer_pool config exists', async () => {
+    const configDirectory = mkdtempSync(path.join(os.tmpdir(), 'review-broker-mcp-config-'));
+    tempDirectories.push(configDirectory);
+
+    const configPath = path.join(configDirectory, 'config.json');
+    writeFileSync(
+      configPath,
+      JSON.stringify(
+        {
+          reviewer_pool: {
+            max_pool_size: 2,
+            scaling_ratio: 1,
+            idle_timeout_seconds: 300,
+            max_ttl_seconds: 3600,
+            claim_timeout_seconds: 1200,
+            spawn_cooldown_seconds: 1,
+            background_check_interval_seconds: 5,
+          },
+          reviewer: {
+            provider: 'fixture-worker',
+            providers: {
+              'fixture-worker': {
+                command: process.execPath,
+                args: [ABSOLUTE_REVIEWER_FIXTURE_PATH],
+              },
+            },
+          },
+        },
+        null,
+        2,
+      ),
+    );
+
+    const harness = await createHarness({
+      extraEnv: {
+        REVIEW_BROKER_CONFIG_PATH: configPath,
+      },
+    });
+
+    await harness.client.callTool({
+      name: 'create_review',
+      arguments: {
+        title: 'Pool-disabled MCP review',
+        description: 'Ensure MCP runtime does not autoscale reviewer workers.',
+        diff: readFixture('valid-review.diff'),
+        authorId: 'agent-author',
+        priority: 'normal',
+      },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    const reviewers = await harness.client.callTool({
+      name: 'list_reviewers',
+      arguments: {},
+    });
+
+    expect((reviewers.structuredContent as { reviewers: unknown[] }).reviewers).toHaveLength(0);
   });
 
   it('surfaces structured tool failures and redacted stderr diagnostics for invalid broker dispatches', async () => {
@@ -187,27 +247,22 @@ describe('review-broker-server MCP stdio surface', () => {
   });
 });
 
-async function createHarness(): Promise<{ client: Client; transport: StdioClientTransport; stderrLines: string[] }> {
+async function createHarness(options: { extraEnv?: Record<string, string> } = {}): Promise<{ client: Client; transport: StdioClientTransport; stderrLines: string[] }> {
   const directory = mkdtempSync(path.join(os.tmpdir(), 'review-broker-mcp-'));
   tempDirectories.push(directory);
 
   const stderrLines: string[] = [];
   const transport = new StdioClientTransport({
-    command: 'corepack',
+    command: TSX_PATH,
     args: [
-      'pnpm',
-      '--filter',
-      'review-broker-server',
-      'exec',
-      'tsx',
-      'src/cli/start-mcp.ts',
+      CLI_PATH,
       '--db-path',
       path.join(directory, 'broker.sqlite'),
       '--cwd',
       WORKTREE_ROOT,
     ],
     cwd: WORKTREE_ROOT,
-    env: buildChildEnv(),
+    env: buildChildEnv(options.extraEnv),
     stderr: 'pipe',
   });
 
@@ -230,10 +285,13 @@ async function createHarness(): Promise<{ client: Client; transport: StdioClient
   return { client, transport, stderrLines };
 }
 
-function buildChildEnv(): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
-  );
+function buildChildEnv(overrides: Record<string, string> = {}): Record<string, string> {
+  return {
+    ...Object.fromEntries(
+      Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+    ),
+    ...overrides,
+  };
 }
 
 function readFixture(fileName: string): string {

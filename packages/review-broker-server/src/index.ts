@@ -8,6 +8,7 @@ import type {
   ReviewerStatus,
 } from 'review-broker-core';
 
+import { resolveSelectedReviewerProvider, validateReviewerWorkerCommand } from './cli/config.js';
 import type { AppContext, CreateAppContextOptions } from './runtime/app-context.js';
 import { createAppContext } from './runtime/app-context.js';
 import type {
@@ -41,6 +42,11 @@ export * from './agent/reviewer-tools.js';
 
 export interface StartBrokerOptions extends CreateAppContextOptions, CreateBrokerServiceOptions {
   handleSignals?: boolean;
+  /**
+   * Enable reviewer pool management when reviewer_pool config is present.
+   * Defaults to true.
+   */
+  enablePool?: boolean;
   /** Command used to spawn pool reviewer processes. Required when poolConfig is set. */
   poolSpawnCommand?: string;
   /** Arguments for the pool reviewer spawn command. */
@@ -154,12 +160,27 @@ export function startBroker(options: StartBrokerOptions = {}): StartedBrokerRunt
   const startupRecovery = reconcileStartupRecovery(context, options.now);
   const startedAt = options.now ? options.now() : new Date().toISOString();
 
-  // Create pool manager if pool configuration is present and spawn command is provided
+  // Create pool manager if pool configuration is present and we can resolve a reviewer worker command.
   let poolManager: PoolManager | null = null;
   let poolRecovery: PoolStartupRecoverySnapshot | null = null;
-  if (context.poolConfig !== null) {
-    const spawnCommand = options.poolSpawnCommand ?? process.execPath;
-    const spawnArgs = options.poolSpawnArgs ?? [];
+  if (options.enablePool !== false && context.poolConfig !== null) {
+    const configuredProvider =
+      options.poolSpawnCommand === undefined && options.poolSpawnArgs === undefined
+        ? resolveSelectedReviewerProvider(context.configPath)
+        : null;
+
+    const spawnCommand = options.poolSpawnCommand ?? configuredProvider?.command;
+    const spawnArgs = options.poolSpawnArgs ?? configuredProvider?.args ?? [];
+
+    if (spawnCommand) {
+      validateReviewerWorkerCommand(spawnCommand, spawnArgs, 'Pool worker');
+    }
+
+    if (!spawnCommand) {
+      throw new Error(
+        `Reviewer pool is enabled but no worker command is configured. Set reviewer.provider/reviewer.providers.* in ${context.configPath} or pass poolSpawnCommand/poolSpawnArgs programmatically.`,
+      );
+    }
 
     poolManager = createPoolManager({
       reviewerManager: context.reviewerManager,
