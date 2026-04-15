@@ -22,14 +22,24 @@ import {
 
 describe('review-broker-core reviewer contracts', () => {
   it('locks reviewer lifecycle vocabulary and diagnostic topics', () => {
-    expect(ReviewerStatusSchema.options).toEqual(['idle', 'assigned', 'offline']);
+    expect(ReviewerStatusSchema.options).toEqual(['idle', 'assigned', 'draining', 'offline']);
     expect(ReviewerOfflineReasonSchema.options).toEqual([
       'spawn_failed',
       'reviewer_exit',
       'operator_kill',
       'startup_recovery',
+      'idle_timeout',
+      'ttl_expired',
+      'pool_drain',
     ]);
-    expect(ReviewReclaimCauseSchema.options).toEqual(['reviewer_exit', 'operator_kill', 'startup_recovery']);
+    expect(ReviewReclaimCauseSchema.options).toEqual([
+      'reviewer_exit',
+      'operator_kill',
+      'startup_recovery',
+      'idle_timeout',
+      'ttl_expired',
+      'pool_drain',
+    ]);
     expect(REVIEWER_AUDIT_EVENT_TYPES).toEqual([
       'reviewer.spawned',
       'reviewer.spawn_failed',
@@ -45,7 +55,7 @@ describe('review-broker-core reviewer contracts', () => {
       status: 'assigned',
       currentReviewId: 'rvw_123',
       command: 'node',
-      args: ['packages/review-broker-server/test/fixtures/reviewer-worker.mjs'],
+      args: ['test/fixtures/reviewer-worker.mjs'],
       cwd: 'packages/review-broker-server',
       pid: 4321,
       startedAt: '2026-03-21T17:00:00.000Z',
@@ -54,6 +64,8 @@ describe('review-broker-core reviewer contracts', () => {
       offlineReason: null,
       exitCode: null,
       exitSignal: null,
+      sessionToken: null,
+      drainingAt: null,
       createdAt: '2026-03-21T17:00:00.000Z',
       updatedAt: '2026-03-21T17:00:05.000Z',
     });
@@ -103,7 +115,7 @@ describe('review-broker-core reviewer contracts', () => {
         status: 'idle',
         currentReviewId: null,
         command: 'node',
-        args: ['packages/review-broker-server/test/fixtures/reviewer-worker.mjs'],
+        args: ['test/fixtures/reviewer-worker.mjs'],
         cwd: 'packages/review-broker-server',
         pid: 4321,
         startedAt: '2026-03-21T17:00:00.000Z',
@@ -112,6 +124,8 @@ describe('review-broker-core reviewer contracts', () => {
         offlineReason: null,
         exitCode: null,
         exitSignal: null,
+        sessionToken: null,
+        drainingAt: null,
         createdAt: '2026-03-21T17:00:00.000Z',
         updatedAt: '2026-03-21T17:00:01.000Z',
       },
@@ -146,7 +160,7 @@ describe('review-broker-core reviewer contracts', () => {
           status: 'offline',
           currentReviewId: null,
           command: 'node',
-          args: ['packages/review-broker-server/test/fixtures/reviewer-worker.mjs'],
+          args: ['test/fixtures/reviewer-worker.mjs'],
           cwd: 'packages/review-broker-server',
           pid: null,
           startedAt: '2026-03-21T17:00:00.000Z',
@@ -155,6 +169,8 @@ describe('review-broker-core reviewer contracts', () => {
           offlineReason: 'operator_kill',
           exitCode: null,
           exitSignal: 'SIGTERM',
+          sessionToken: null,
+          drainingAt: null,
           createdAt: '2026-03-21T17:00:00.000Z',
           updatedAt: '2026-03-21T17:01:00.000Z',
         },
@@ -241,6 +257,8 @@ describe('review-broker-core reviewer contracts', () => {
             offlineReason: null,
             exitCode: null,
             exitSignal: null,
+            sessionToken: null,
+            drainingAt: null,
             createdAt: '2026-03-21T17:00:00.000Z',
             updatedAt: '2026-03-21T17:00:01.000Z',
           },

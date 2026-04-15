@@ -12,7 +12,7 @@ import { startBroker } from '../src/index.js';
 import { createDashboardRoutes } from '../src/http/dashboard-routes.js';
 import { createDashboardServer } from '../src/http/dashboard-server.js';
 
-import { WORKTREE_ROOT, FIXTURE_PATH } from './test-paths.js';
+import { WORKTREE_ROOT, REVIEWER_FIXTURE_PATH } from './test-paths.js';
 
 const tempDirectories: string[] = [];
 
@@ -232,7 +232,7 @@ describe('http event feed routes', () => {
       await runtime.service.spawnReviewer({
         reviewerId: 'filter-test-reviewer',
         command: process.execPath,
-        args: [FIXTURE_PATH],
+        args: [REVIEWER_FIXTURE_PATH],
         cwd: 'packages/review-broker-server',
       });
 
@@ -325,7 +325,7 @@ describe('http event feed routes', () => {
       await runtime.service.spawnReviewer({
         reviewerId: 'redaction-test-reviewer',
         command: process.execPath,
-        args: [FIXTURE_PATH],
+        args: [REVIEWER_FIXTURE_PATH],
         cwd: 'packages/review-broker-server',
       });
 
@@ -367,7 +367,7 @@ describe('http event feed routes', () => {
         expect(serialized).not.toContain(process.execPath);
 
         // The fixture path used as args should not appear
-        expect(serialized).not.toContain(FIXTURE_PATH);
+        expect(serialized).not.toContain(REVIEWER_FIXTURE_PATH);
 
         // The cwd should not appear
         expect(serialized).not.toContain('packages/review-broker-server');

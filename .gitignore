@@ -34,3 +34,6 @@ tmp/
 .tmp-review-*/
 .tmp-review-runtime-proof/
 packages/review-broker-server/.tmp/
+
+# ── GSD baseline (auto-generated) ──
+.gsd-id

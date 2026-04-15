@@ -84,6 +84,8 @@ describe('review-broker-server SQLite bootstrap', () => {
           'offline_reason',
           'exit_code',
           'exit_signal',
+          'session_token',
+          'draining_at',
           'created_at',
           'updated_at',
         ]),
@@ -94,19 +96,22 @@ describe('review-broker-server SQLite bootstrap', () => {
           'idx_messages_review_round_created_at',
           'idx_reviewers_offline_at',
           'idx_reviewers_pid_active',
+          'idx_reviewers_session_token',
           'idx_reviewers_updated_at',
           'idx_reviews_claimed_by_status_updated_at',
         ]),
       );
-      expect(migrations).toHaveLength(3);
+      expect(migrations).toHaveLength(4);
       expect(migrations.map((migration) => migration.id)).toEqual([
         '001_init',
         '002_review_lifecycle_parity',
         '003_reviewer_lifecycle',
+        '004_pool_management',
       ]);
       expect(migrations[0]?.checksum).toHaveLength(64);
       expect(migrations[1]?.checksum).toHaveLength(64);
       expect(migrations[2]?.checksum).toHaveLength(64);
+      expect(migrations[3]?.checksum).toHaveLength(64);
       expect(opened.pragmas).toEqual({
         journalMode: 'WAL',
         busyTimeoutMs: 5_000,
@@ -135,6 +140,7 @@ describe('review-broker-server SQLite bootstrap', () => {
         { id: '001_init' },
         { id: '002_review_lifecycle_parity' },
         { id: '003_reviewer_lifecycle' },
+        { id: '004_pool_management' },
       ]);
     } finally {
       secondOpen.close();
@@ -231,7 +237,7 @@ describe('review-broker-server SQLite bootstrap', () => {
       reviewers.recordSpawned({
         reviewerId: 'reviewer_bootstrap_001',
         command: 'node',
-        args: ['packages/review-broker-server/test/fixtures/reviewer-worker.mjs'],
+        args: ['test/fixtures/reviewer-worker.mjs'],
         cwd: 'packages/review-broker-server',
         pid: 4321,
         startedAt: claimedAt,
@@ -326,7 +332,7 @@ describe('review-broker-server SQLite bootstrap', () => {
         status: 'offline',
         currentReviewId: null,
         command: 'node',
-        args: ['packages/review-broker-server/test/fixtures/reviewer-worker.mjs'],
+        args: ['test/fixtures/reviewer-worker.mjs'],
         cwd: 'packages/review-broker-server',
         pid: null,
         startedAt: claimedAt,

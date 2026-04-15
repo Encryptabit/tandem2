@@ -662,6 +662,148 @@ describe('pool manager lifecycle', () => {
     );
   });
 
+  it('reactiveScale pauses spawning after rapid reviewer exits in the current pool session', async () => {
+    let now = '2026-03-26T00:00:30.000Z';
+    const reviewerRows: any[] = [];
+
+    const mockReviewerManager = {
+      spawnReviewer: vi.fn().mockResolvedValue({
+        reviewerId: 'reviewer_new',
+        status: 'idle' as const,
+        currentReviewId: null,
+        command: 'node',
+        args: ['worker.js'],
+        cwd: null,
+        pid: 1001,
+        startedAt: '2026-03-26T00:00:30.000Z',
+        lastSeenAt: '2026-03-26T00:00:30.000Z',
+        offlineAt: null,
+        offlineReason: null,
+        exitCode: null,
+        exitSignal: null,
+        sessionToken: null,
+        drainingAt: null,
+        createdAt: '2026-03-26T00:00:30.000Z',
+        updatedAt: '2026-03-26T00:00:30.000Z',
+      }),
+      stopReviewer: vi.fn(),
+      shutdown: vi.fn(),
+      inspect: vi.fn(),
+      isProcessAlive: vi.fn().mockReturnValue(false),
+      getTrackedReviewerIds: vi.fn().mockReturnValue([]),
+      setOfflineHandler: vi.fn(),
+      close: vi.fn(),
+    };
+
+    const mockReviewers = {
+      recordSpawned: vi.fn(),
+      recordSpawnFailure: vi.fn(),
+      markOffline: vi.fn(),
+      markDraining: vi.fn(),
+      touch: vi.fn(),
+      getById: vi.fn(),
+      list: vi.fn().mockImplementation(() => reviewerRows),
+    };
+
+    const mockReviews = {
+      insert: vi.fn(),
+      getById: vi.fn(),
+      list: vi.fn().mockReturnValue([]),
+      countByStatus: vi.fn().mockReturnValue(3),
+      updateState: vi.fn(),
+      recordVerdict: vi.fn(),
+      recordCounterPatchDecision: vi.fn(),
+      recordMessageActivity: vi.fn(),
+      getCounterPatchDecision: vi.fn(),
+    };
+
+    const mockAudit = {
+      append: vi.fn().mockReturnValue({
+        auditEventId: 1,
+        reviewId: null,
+        eventType: 'pool.scale_up',
+        actorId: null,
+        statusFrom: null,
+        statusTo: null,
+        errorCode: null,
+        metadata: {},
+        createdAt: '',
+      }),
+      listForReview: vi.fn(),
+      listActivityForReview: vi.fn(),
+      getLatestForReview: vi.fn(),
+      listGlobal: vi.fn(),
+    };
+
+    const poolManager = createPoolManager({
+      reviewerManager: mockReviewerManager,
+      reviewers: mockReviewers,
+      reviews: mockReviews,
+      audit: mockAudit,
+      poolConfig: {
+        max_pool_size: 5,
+        idle_timeout_seconds: 300,
+        max_ttl_seconds: 3600,
+        claim_timeout_seconds: 1200,
+        spawn_cooldown_seconds: 1,
+        scaling_ratio: 1,
+        background_check_interval_seconds: 30,
+      },
+      notifications: { notify: vi.fn().mockReturnValue(0) },
+      spawnCommand: 'node',
+      spawnArgs: ['worker.js'],
+      now: () => now,
+    });
+
+    const sessionToken = poolManager.getSessionToken();
+    reviewerRows.push(
+      ...Array.from({ length: 5 }, (_, index) => ({
+        reviewerId: `reviewer_exit_${index}`,
+        status: 'offline',
+        currentReviewId: null,
+        command: 'node',
+        args: ['worker.js'],
+        cwd: null,
+        pid: null,
+        startedAt: '2026-03-26T00:00:00.000Z',
+        lastSeenAt: '2026-03-26T00:00:20.000Z',
+        offlineAt: '2026-03-26T00:00:20.000Z',
+        offlineReason: 'reviewer_exit',
+        exitCode: 1,
+        exitSignal: null,
+        sessionToken,
+        drainingAt: null,
+        createdAt: '2026-03-26T00:00:00.000Z',
+        updatedAt: '2026-03-26T00:00:20.000Z',
+      })),
+    );
+
+    await poolManager.reactiveScale();
+
+    expect(mockReviewerManager.spawnReviewer).not.toHaveBeenCalled();
+    expect(mockAudit.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: 'pool.scale_paused',
+        metadata: expect.objectContaining({
+          rapidExitCount: 5,
+          sessionToken,
+        }),
+      }),
+    );
+
+    reviewerRows.length = 0;
+
+    // Still paused inside the pause window.
+    now = '2026-03-26T00:00:45.000Z';
+    await poolManager.reactiveScale();
+    expect(mockReviewerManager.spawnReviewer).not.toHaveBeenCalled();
+
+    // Pause expires after 60s; scaling resumes.
+    now = '2026-03-26T00:01:31.000Z';
+    await poolManager.reactiveScale();
+    expect(mockReviewerManager.spawnReviewer).toHaveBeenCalledTimes(3);
+  });
+
   it('reactiveScale isScaling guard prevents concurrent execution', async () => {
     let resolveFirstCall!: () => void;
     const firstCallPromise = new Promise<void>((resolve) => {
@@ -952,6 +1094,65 @@ describe('pool integration tests', () => {
 
     expect(runtime.poolManager).toBeNull();
     expect(runtime.context.poolConfig).toBeNull();
+  });
+
+  it('uses reviewer.provider config to autospawn pool workers when explicit spawn args are omitted', async () => {
+    const directory = mkdtempSync(path.join(os.tmpdir(), 'review-broker-pool-provider-'));
+    tempDirectories.push(directory);
+
+    const configPath = path.join(directory, 'config.json');
+    writeFileSync(
+      configPath,
+      JSON.stringify(
+        {
+          reviewer_pool: {
+            max_pool_size: 2,
+            scaling_ratio: 1,
+            idle_timeout_seconds: 300,
+            max_ttl_seconds: 3600,
+            claim_timeout_seconds: 1200,
+            spawn_cooldown_seconds: 1,
+            background_check_interval_seconds: 60,
+          },
+          reviewer: {
+            provider: 'test-worker',
+            providers: {
+              'test-worker': {
+                command: process.execPath,
+                args: [path.resolve(WORKTREE_ROOT, FIXTURE_PATH)],
+              },
+            },
+          },
+        },
+        null,
+        2,
+      ),
+    );
+
+    const dbPath = path.join(directory, 'broker.sqlite');
+    const runtime = startBroker({
+      cwd: WORKTREE_ROOT,
+      dbPath,
+      handleSignals: false,
+      env: {
+        ...process.env,
+        REVIEW_BROKER_CONFIG_PATH: configPath,
+      },
+    });
+    openRuntimes.push(runtime);
+
+    await runtime.service.createReview({
+      title: 'Provider-configured pool spawn review',
+      description: 'Verify reviewer.provider drives pool autospawn when no explicit worker command is passed.',
+      diff: readFixture('valid-review.diff'),
+      authorId: 'author-1',
+      priority: 'normal',
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    const reviewerList = await runtime.service.listReviewers({});
+    expect(reviewerList.reviewers.length).toBeGreaterThanOrEqual(1);
   });
 
   it('drain lifecycle respects open-review gate — not killed while review is claimed', async () => {

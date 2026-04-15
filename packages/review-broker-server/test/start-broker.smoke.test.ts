@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createAppContext } from '../src/runtime/app-context.js';
 import { createBrokerService } from '../src/runtime/broker-service.js';
 
-import { CLI_PATH, FIXTURE_PATH, TSX_PATH, WORKTREE_ROOT } from './test-paths.js';
+import { CLI_PATH, REVIEWER_FIXTURE_PATH, TSX_PATH, WORKTREE_ROOT } from './test-paths.js';
 const tempDirectories: string[] = [];
 
 afterEach(() => {
@@ -39,7 +39,7 @@ describe('review-broker-server standalone start command', () => {
           event: 'broker.started',
           mode: 'once',
           dbPath: path.resolve(dbPath),
-          migrations: ['001_init', '002_review_lifecycle_parity', '003_reviewer_lifecycle'],
+          migrations: ['001_init', '002_review_lifecycle_parity', '003_reviewer_lifecycle', '004_pool_management'],
           startupRecovery: expect.objectContaining({
             recoveredReviewerIds: [],
             reclaimedReviewIds: [],
@@ -57,7 +57,7 @@ describe('review-broker-server standalone start command', () => {
           reviewerStatusCounts: {},
           messageCount: 0,
           auditEventCount: 0,
-          migrationCount: 3,
+          migrationCount: 4,
           statusCounts: {},
           counterPatchStatusCounts: {},
           latestReview: null,
@@ -87,7 +87,7 @@ describe('review-broker-server standalone start command', () => {
           event: 'broker.started',
           mode: 'once',
           dbPath: path.resolve(dbPath),
-          migrations: ['001_init', '002_review_lifecycle_parity', '003_reviewer_lifecycle'],
+          migrations: ['001_init', '002_review_lifecycle_parity', '003_reviewer_lifecycle', '004_pool_management'],
           startupRecovery: expect.objectContaining({
             recoveredReviewerIds: ['smoke-reviewer-1'],
             reclaimedReviewIds: [seededReviewId],
@@ -114,7 +114,7 @@ describe('review-broker-server standalone start command', () => {
           },
           messageCount: 0,
           auditEventCount: 5,
-          migrationCount: 3,
+          migrationCount: 4,
           statusCounts: {
             pending: 1,
           },
@@ -134,7 +134,7 @@ describe('review-broker-server standalone start command', () => {
             status: 'offline',
             currentReviewId: null,
             command: path.basename(process.execPath),
-            args: ['packages/review-broker-server/test/fixtures/reviewer-worker.mjs'],
+            args: ['test/fixtures/reviewer-worker.mjs'],
             cwd: 'packages/review-broker-server',
             pid: null,
             offlineReason: 'startup_recovery',
@@ -213,7 +213,7 @@ describe('review-broker-server standalone start command', () => {
         )
         .all();
 
-      expect(migrationCount?.count).toBe(3);
+      expect(migrationCount?.count).toBe(4);
       expect(reviewRow).toMatchObject({
         status: 'pending',
         claimed_by: null,
@@ -226,7 +226,7 @@ describe('review-broker-server standalone start command', () => {
         pid: null,
         offline_reason: 'startup_recovery',
       });
-      expect(JSON.parse(reviewerRow!.args_json)).toEqual(['packages/review-broker-server/test/fixtures/reviewer-worker.mjs']);
+      expect(JSON.parse(reviewerRow!.args_json)).toEqual(['test/fixtures/reviewer-worker.mjs']);
       expect(auditRows.map((row) => row.event_type)).toEqual([
         'reviewer.spawned',
         'review.created',
@@ -365,7 +365,7 @@ async function seedStaleReviewerState(dbPath: string): Promise<string> {
     await service.spawnReviewer({
       reviewerId: 'smoke-reviewer-1',
       command: process.execPath,
-      args: [FIXTURE_PATH],
+      args: [REVIEWER_FIXTURE_PATH],
       cwd: 'packages/review-broker-server',
     });
 

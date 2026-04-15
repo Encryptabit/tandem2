@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { StartBrokerOptions, StartedBrokerRuntime } from '../src/index.js';
 import { inspectBrokerRuntime, startBroker } from '../src/index.js';
 
-import { FIXTURE_PATH, WORKTREE_ROOT } from './test-paths.js';
+import { REVIEWER_FIXTURE_PATH, WORKTREE_ROOT } from './test-paths.js';
 const tempDirectories: string[] = [];
 const openRuntimes: StartedBrokerRuntime[] = [];
 
@@ -39,7 +39,7 @@ describe('review-broker-server reviewer recovery', () => {
     const spawned = await harness.runtime.service.spawnReviewer({
       reviewerId: 'reviewer-exit-1',
       command: process.execPath,
-      args: [FIXTURE_PATH],
+      args: [REVIEWER_FIXTURE_PATH],
       cwd: 'packages/review-broker-server',
     });
     const created = await harness.runtime.service.createReview({
@@ -143,7 +143,7 @@ describe('review-broker-server reviewer recovery', () => {
     await harness.runtime.service.spawnReviewer({
       reviewerId: 'reviewer-kill-1',
       command: process.execPath,
-      args: [FIXTURE_PATH],
+      args: [REVIEWER_FIXTURE_PATH],
       cwd: 'packages/review-broker-server',
     });
     const created = await harness.runtime.service.createReview({
@@ -236,7 +236,7 @@ describe('review-broker-server reviewer recovery', () => {
     await harness.runtime.service.spawnReviewer({
       reviewerId: 'reviewer-race-1',
       command: process.execPath,
-      args: [FIXTURE_PATH],
+      args: [REVIEWER_FIXTURE_PATH],
       cwd: 'packages/review-broker-server',
     });
     const created = await harness.runtime.service.createReview({

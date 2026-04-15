@@ -3,7 +3,14 @@
     "review-broker": {
       "type": "stdio",
       "command": "corepack",
-      "args": ["pnpm", "broker:mcp"]
+      "args": [
+        "pnpm",
+        "--filter",
+        "tandem2",
+        "exec",
+        "tsx",
+        "src/cli/start-mcp.ts"
+      ]
     }
   }
 }

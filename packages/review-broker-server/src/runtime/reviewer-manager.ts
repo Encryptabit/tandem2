@@ -122,6 +122,11 @@ export function createReviewerManager(options: CreateReviewerManagerOptions): Re
       child = spawn(rawCommand, rawArgs, {
         cwd: resolvedCwd,
         stdio: ['pipe', 'pipe', 'pipe'],
+        env: {
+          ...process.env,
+          REVIEW_BROKER_REVIEWER_ID: reviewerId,
+          REVIEW_BROKER_WORKSPACE_ROOT: options.workspaceRoot,
+        },
       });
     } catch (error) {
       const reviewer = options.reviewers.recordSpawnFailure({

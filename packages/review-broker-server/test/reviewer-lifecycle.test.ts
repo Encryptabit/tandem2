@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { StartedBrokerRuntime } from '../src/index.js';
 import { inspectBrokerRuntime, startBroker } from '../src/index.js';
 
-import { FIXTURE_PATH, WORKTREE_ROOT } from './test-paths.js';
+import { REVIEWER_FIXTURE_PATH, WORKTREE_ROOT } from './test-paths.js';
 const tempDirectories: string[] = [];
 const openRuntimes: StartedBrokerRuntime[] = [];
 
@@ -50,7 +50,7 @@ describe('review-broker-server reviewer lifecycle runtime', () => {
     const spawned = await harness.runtime.service.spawnReviewer({
       reviewerId: 'reviewer-public-1',
       command: process.execPath,
-      args: [FIXTURE_PATH],
+      args: [REVIEWER_FIXTURE_PATH],
       cwd: 'packages/review-broker-server',
     });
 
@@ -61,7 +61,7 @@ describe('review-broker-server reviewer lifecycle runtime', () => {
       status: 'idle',
       currentReviewId: null,
       command: path.basename(process.execPath),
-      args: ['packages/review-broker-server/test/fixtures/reviewer-worker.mjs'],
+      args: ['test/fixtures/reviewer-worker.mjs'],
       cwd: 'packages/review-broker-server',
       offlineAt: null,
       offlineReason: null,
@@ -123,7 +123,7 @@ describe('review-broker-server reviewer lifecycle runtime', () => {
         status: 'assigned',
         currentReviewId: trackedReview.review.reviewId,
         command: path.basename(process.execPath),
-        args: ['packages/review-broker-server/test/fixtures/reviewer-worker.mjs'],
+        args: ['test/fixtures/reviewer-worker.mjs'],
         cwd: 'packages/review-broker-server',
       },
     });
@@ -189,7 +189,7 @@ describe('review-broker-server reviewer lifecycle runtime', () => {
     const spawned = await harness.runtime.service.spawnReviewer({
       reviewerId: 'reviewer-shutdown-1',
       command: process.execPath,
-      args: [FIXTURE_PATH],
+      args: [REVIEWER_FIXTURE_PATH],
       cwd: 'packages/review-broker-server',
     });
     const pid = spawned.reviewer.pid;

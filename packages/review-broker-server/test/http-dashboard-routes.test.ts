@@ -16,7 +16,7 @@ import { inspectBrokerRuntime, startBroker } from '../src/index.js';
 import { createDashboardRoutes } from '../src/http/dashboard-routes.js';
 import { createDashboardServer } from '../src/http/dashboard-server.js';
 
-import { WORKTREE_ROOT, FIXTURE_PATH } from './test-paths.js';
+import { WORKTREE_ROOT, REVIEWER_FIXTURE_PATH } from './test-paths.js';
 
 const tempDirectories: string[] = [];
 
@@ -142,7 +142,7 @@ describe('http dashboard routes', () => {
     await seedService.spawnReviewer({
       reviewerId: 'stale-reviewer-1',
       command: process.execPath,
-      args: [FIXTURE_PATH],
+      args: [REVIEWER_FIXTURE_PATH],
       cwd: 'packages/review-broker-server',
     });
 
@@ -206,7 +206,7 @@ describe('http dashboard routes', () => {
       await runtime.service.spawnReviewer({
         reviewerId: 'redact-test-reviewer',
         command: process.execPath,
-        args: [FIXTURE_PATH],
+        args: [REVIEWER_FIXTURE_PATH],
         cwd: 'packages/review-broker-server',
       });
 

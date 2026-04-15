@@ -29,7 +29,7 @@ import { startBroker } from '../src/index.js';
 import { createDashboardRoutes } from '../src/http/dashboard-routes.js';
 import { createDashboardServer, type DashboardServer } from '../src/http/dashboard-server.js';
 
-import { WORKTREE_ROOT, FIXTURE_PATH, DASHBOARD_DIST_PATH } from './test-paths.js';
+import { WORKTREE_ROOT, REVIEWER_FIXTURE_PATH, DASHBOARD_DIST_PATH } from './test-paths.js';
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -373,7 +373,7 @@ describe('cross-surface acceptance', () => {
     await seedService.spawnReviewer({
       reviewerId: 'stale-reviewer-accept',
       command: process.execPath,
-      args: [FIXTURE_PATH],
+      args: [REVIEWER_FIXTURE_PATH],
       cwd: 'packages/review-broker-server',
     });
 

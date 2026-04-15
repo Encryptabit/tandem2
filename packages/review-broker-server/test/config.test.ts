@@ -144,6 +144,43 @@ describe('config module', () => {
       expect(result).toEqual({ command: '/usr/bin/reviewer' });
     });
 
+    it('throws when node-based provider has no args', () => {
+      const p = configPath();
+      writeConfig(p, {
+        reviewer: {
+          providers: {
+            brokenNode: {
+              command: 'node',
+            },
+          },
+        },
+      });
+
+      expect(() => resolveProvider(p, 'brokenNode')).toThrow(
+        'Provider "brokenNode" command "node" requires at least one script/module argument.',
+      );
+    });
+
+    it('allows node-based provider when script args are present', () => {
+      const p = configPath();
+      writeConfig(p, {
+        reviewer: {
+          providers: {
+            worker: {
+              command: 'node',
+              args: ['packages/review-broker-server/scripts/reviewer-worker.mjs'],
+            },
+          },
+        },
+      });
+
+      const result = resolveProvider(p, 'worker');
+      expect(result).toEqual({
+        command: 'node',
+        args: ['packages/review-broker-server/scripts/reviewer-worker.mjs'],
+      });
+    });
+
     it('parses JSON-stringified args from setConfigValue', () => {
       const p = configPath();
       setConfigValue(p, 'reviewer.providers.test.command', '/usr/bin/test');

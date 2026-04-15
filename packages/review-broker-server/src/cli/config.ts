@@ -9,6 +9,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
+const NODE_PROVIDER_COMMANDS = new Set(['node', 'node.exe', 'nodejs', 'nodejs.exe']);
+
 /**
  * Read and parse the broker config JSON file.
  * Returns `{}` if the file does not exist.
@@ -29,6 +31,28 @@ export function writeConfig(configPath: string, data: Record<string, unknown>): 
   const dir = path.dirname(configPath);
   mkdirSync(dir, { recursive: true });
   writeFileSync(configPath, JSON.stringify(data, null, 2) + '\n', 'utf8');
+}
+
+/**
+ * Validate reviewer worker command semantics for known process launchers.
+ *
+ * Node-style commands (`node`, `node.exe`, `nodejs`, `nodejs.exe`) require at
+ * least one arg (script or module entrypoint). Running bare `node` with no
+ * args exits quickly (or drops into REPL), which causes pool spawn churn.
+ */
+export function validateReviewerWorkerCommand(
+  command: string,
+  args: string[] | undefined,
+  sourceLabel: string,
+): void {
+  const commandName = path.basename(command).toLowerCase();
+
+  if (NODE_PROVIDER_COMMANDS.has(commandName) && (args === undefined || args.length === 0)) {
+    throw new Error(
+      `${sourceLabel} command "${command}" requires at least one script/module argument. ` +
+        'Configure provider args, for example: ["packages/review-broker-server/scripts/reviewer-worker.mjs"].',
+    );
+  }
 }
 
 /**
@@ -92,7 +116,37 @@ export function resolveProvider(
     }
   }
 
+  validateReviewerWorkerCommand(command, args, `Provider "${providerName}"`);
+
   return { command, ...(args !== undefined ? { args } : {}) };
+}
+
+/**
+ * Resolve the currently selected reviewer provider from config.
+ *
+ * Reads `reviewer.provider`, then resolves it through `reviewer.providers.<name>`.
+ * Returns null when no active provider is configured.
+ */
+export function resolveSelectedReviewerProvider(
+  configPath: string,
+): { providerName: string; command: string; args?: string[] } | null {
+  const config = readConfig(configPath);
+  const reviewer = config.reviewer;
+
+  if (typeof reviewer !== 'object' || reviewer === null || Array.isArray(reviewer)) {
+    return null;
+  }
+
+  const providerName = (reviewer as Record<string, unknown>).provider;
+  if (typeof providerName !== 'string' || providerName.trim().length === 0) {
+    return null;
+  }
+
+  const resolved = resolveProvider(configPath, providerName);
+  return {
+    providerName,
+    ...resolved,
+  };
 }
 
 /**

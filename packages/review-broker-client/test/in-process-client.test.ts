@@ -163,7 +163,7 @@ describe('review-broker-client in-process client', () => {
       status: 'idle',
       currentReviewId: null,
       command: path.basename(process.execPath),
-      args: ['packages/review-broker-server/test/fixtures/reviewer-worker.mjs'],
+      args: ['test/fixtures/reviewer-worker.mjs'],
       cwd: 'packages/review-broker-server',
       offlineAt: null,
       offlineReason: null,

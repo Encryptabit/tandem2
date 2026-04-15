@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 
@@ -575,15 +575,15 @@ async function handleReviewersSpawn(
  * Walks up from the broker-server package to find the sibling dashboard package.
  */
 function resolveDashboardDistPath(cwd: string): string {
-  // Try relative to cwd (workspace root) first
   const fromCwd = path.resolve(cwd, 'packages', 'review-broker-dashboard', 'dist');
-  // Fallback: resolve relative to this CLI file's package
-  const fromPackage = path.resolve(
+  if (existsSync(fromCwd)) {
+    return fromCwd;
+  }
+
+  return path.resolve(
     path.dirname(new URL(import.meta.url).pathname),
     '..', '..', '..', 'review-broker-dashboard', 'dist',
   );
-  // Prefer the cwd-relative path if it's a workspace context; otherwise use the package-relative one
-  return fromCwd.includes('review-broker-dashboard') ? fromCwd : fromPackage;
 }
 
 async function handleDashboard(

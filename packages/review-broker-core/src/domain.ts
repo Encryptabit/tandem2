@@ -61,6 +61,7 @@ export type ReviewerAuditEventType = (typeof REVIEWER_AUDIT_EVENT_TYPES)[number]
 
 export const POOL_AUDIT_EVENT_TYPES = [
   'pool.scale_up',
+  'pool.scale_paused',
   'pool.drain_initiated',
   'pool.drain_completed',
   'pool.dead_process_reaped',

@@ -18,6 +18,7 @@ import { createBrokerService } from '../src/runtime/broker-service.js';
 
 import { REVIEWER_FIXTURE_PATH, WORKTREE_ROOT } from './test-paths.js';
 const START_BROKER_CLI_PATH = path.join(WORKTREE_ROOT, 'packages', 'review-broker-server', 'src', 'cli', 'start-broker.ts');
+const START_MCP_CLI_PATH = path.join(WORKTREE_ROOT, 'packages', 'review-broker-server', 'src', 'cli', 'start-mcp.ts');
 const TSX_PATH = path.join(WORKTREE_ROOT, 'node_modules', '.bin', 'tsx');
 const tempDirectories: string[] = [];
 const openRuntimes: StartedBrokerRuntime[] = [];
@@ -277,7 +278,7 @@ describe('review-broker-server end-to-end standalone parity', () => {
       reviewerStatusCounts: {},
       messageCount: 2,
       auditEventCount: 11,
-      migrationCount: 3,
+      migrationCount: 4,
       statusCounts: {
         closed: 1,
       },
@@ -328,7 +329,7 @@ describe('review-broker-server end-to-end standalone parity', () => {
           event: 'broker.started',
           mode: 'once',
           dbPath: path.resolve(dbPath),
-          migrations: ['001_init', '002_review_lifecycle_parity', '003_reviewer_lifecycle'],
+          migrations: ['001_init', '002_review_lifecycle_parity', '003_reviewer_lifecycle', '004_pool_management'],
           startupRecovery: {
             completedAt: expect.any(String),
             recoveredReviewerIds: [],
@@ -347,7 +348,7 @@ describe('review-broker-server end-to-end standalone parity', () => {
           reviewerStatusCounts: {},
           messageCount: 2,
           auditEventCount: 11,
-          migrationCount: 3,
+          migrationCount: 4,
           statusCounts: {
             closed: 1,
           },
@@ -415,7 +416,7 @@ describe('review-broker-server end-to-end standalone parity', () => {
     expect(startedEvent).toMatchObject({
       mode: 'once',
       dbPath: path.resolve(dbPath),
-      migrations: ['001_init', '002_review_lifecycle_parity', '003_reviewer_lifecycle'],
+      migrations: ['001_init', '002_review_lifecycle_parity', '003_reviewer_lifecycle', '004_pool_management'],
     });
     expectStartupRecoverySnapshot(startedEvent.startupRecovery as BrokerStartupRecoverySnapshot, seeded);
     expect(completedEvent).toMatchObject({
@@ -428,7 +429,7 @@ describe('review-broker-server end-to-end standalone parity', () => {
       },
       messageCount: 1,
       auditEventCount: 14,
-      migrationCount: 3,
+      migrationCount: 4,
       statusCounts: {
         approved: 1,
         pending: 2,
@@ -441,7 +442,7 @@ describe('review-broker-server end-to-end standalone parity', () => {
         status: 'offline',
         currentReviewId: null,
         command: path.basename(process.execPath),
-        args: ['packages/review-broker-server/test/fixtures/reviewer-worker.mjs'],
+        args: ['test/fixtures/reviewer-worker.mjs'],
         cwd: 'packages/review-broker-server',
         pid: null,
         offlineReason: 'startup_recovery',
@@ -620,7 +621,7 @@ describe('review-broker-server end-to-end standalone parity', () => {
       },
       messageCount: 1,
       auditEventCount: 14,
-      migrationCount: 3,
+      migrationCount: 4,
       statusCounts: {
         approved: 1,
         pending: 2,
@@ -633,7 +634,7 @@ describe('review-broker-server end-to-end standalone parity', () => {
         status: 'offline',
         currentReviewId: null,
         command: path.basename(process.execPath),
-        args: ['packages/review-broker-server/test/fixtures/reviewer-worker.mjs'],
+        args: ['test/fixtures/reviewer-worker.mjs'],
         cwd: 'packages/review-broker-server',
         pid: null,
         offlineReason: 'startup_recovery',
@@ -685,14 +686,9 @@ async function closeStartedClient(started: ReturnType<typeof startInProcessBroke
 async function createMcpHarness(dbPath: string): Promise<McpHarness> {
   const stderrLines: string[] = [];
   const transport = new StdioClientTransport({
-    command: 'corepack',
+    command: TSX_PATH,
     args: [
-      'pnpm',
-      '--filter',
-      'review-broker-server',
-      'exec',
-      'tsx',
-      'src/cli/start-mcp.ts',
+      START_MCP_CLI_PATH,
       '--db-path',
       dbPath,
       '--cwd',

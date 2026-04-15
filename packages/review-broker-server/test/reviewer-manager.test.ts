@@ -6,7 +6,7 @@ import type { AppContext } from '../src/runtime/app-context.js';
 import { createAppContext } from '../src/runtime/app-context.js';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { FIXTURE_PATH, WORKTREE_ROOT } from './test-paths.js';
+import { REVIEWER_FIXTURE_PATH, WORKTREE_ROOT } from './test-paths.js';
 const tempDirectories: string[] = [];
 const openContexts: AppContext[] = [];
 
@@ -31,7 +31,7 @@ describe('review-broker-server reviewer manager', () => {
     const spawned = await harness.context.reviewerManager.spawnReviewer({
       reviewerId: 'reviewer-fixture-1',
       command: process.execPath,
-      args: [FIXTURE_PATH],
+      args: [REVIEWER_FIXTURE_PATH],
       cwd: 'packages/review-broker-server',
     });
 
@@ -40,7 +40,7 @@ describe('review-broker-server reviewer manager', () => {
       status: 'idle',
       currentReviewId: null,
       command: path.basename(process.execPath),
-      args: ['packages/review-broker-server/test/fixtures/reviewer-worker.mjs'],
+      args: ['test/fixtures/reviewer-worker.mjs'],
       cwd: 'packages/review-broker-server',
       offlineAt: null,
       offlineReason: null,
@@ -121,7 +121,7 @@ describe('review-broker-server reviewer manager', () => {
       reviewerId: 'reviewer-fixture-1',
       pid: spawned.pid,
       command: path.basename(process.execPath),
-      args: ['packages/review-broker-server/test/fixtures/reviewer-worker.mjs'],
+      args: ['test/fixtures/reviewer-worker.mjs'],
     });
     expect(JSON.parse(reviewerAuditRows[2]!.metadata_json)).toMatchObject({
       reviewerId: 'reviewer-fixture-1',

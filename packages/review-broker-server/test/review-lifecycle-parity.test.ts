@@ -179,7 +179,7 @@ describe('review-broker-server lifecycle parity', () => {
       reviewCount: 1,
       messageCount: 2,
       auditEventCount: 7,
-      migrationCount: 3,
+      migrationCount: 4,
       statusCounts: {
         pending: 1,
       },
