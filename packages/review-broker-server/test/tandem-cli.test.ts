@@ -390,6 +390,25 @@ describe('tandem CLI smoke tests', () => {
       spawnedReviewerIds.push(output.reviewer.reviewerId as string);
     });
 
+    it('supports --detached reviewer spawn for long-lived workers', () => {
+      const result = runTandem([
+        'reviewers', 'spawn',
+        '--command', process.execPath,
+        '--args', path.join('packages', 'review-broker-server', 'test', 'fixtures', 'reviewer-worker.mjs'),
+        '--detached',
+        '--json', '--db-path', dbPath,
+      ]);
+
+      expect(result.status).toBe(0);
+      const output = parseJsonOutput(result.stdout as string) as {
+        reviewer: Record<string, unknown>;
+      };
+      const pid = output.reviewer.pid as number;
+      expect(typeof pid).toBe('number');
+      expect(() => process.kill(pid, 0)).not.toThrow();
+      process.kill(pid, 'SIGTERM');
+    });
+
     it('spawns a reviewer with --provider after configuring provider', () => {
       // Seed config with a test provider
       const spawnConfigDir = mkdtempSync(path.join(os.tmpdir(), 'tandem-spawn-config-'));

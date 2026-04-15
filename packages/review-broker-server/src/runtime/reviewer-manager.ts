@@ -46,6 +46,7 @@ export interface SpawnReviewerInput {
   prompt?: string;
   logDir?: string;
   sessionToken?: string;
+  detached?: boolean;
 }
 
 export interface StopReviewerOptions {
@@ -116,12 +117,16 @@ export function createReviewerManager(options: CreateReviewerManagerOptions): Re
     const resolvedCwd = input.cwd ? path.resolve(options.workspaceRoot, input.cwd) : options.workspaceRoot;
     const createdAt = now();
 
+    const spawnDetached = input.detached === true;
+
     let child: ChildProcess;
 
     try {
       child = spawn(rawCommand, rawArgs, {
         cwd: resolvedCwd,
-        stdio: ['pipe', 'pipe', 'pipe'],
+        ...(spawnDetached
+          ? { detached: true as const, stdio: ['ignore', 'ignore', 'ignore'] as const }
+          : { stdio: ['pipe', 'pipe', 'pipe'] as const }),
         env: {
           ...process.env,
           REVIEW_BROKER_REVIEWER_ID: reviewerId,
@@ -196,6 +201,46 @@ export function createReviewerManager(options: CreateReviewerManagerOptions): Re
       throw new Error(`Reviewer ${reviewerId} did not expose a pid after spawn.`);
     }
 
+    const startedAt = now();
+
+    if (spawnDetached) {
+      try {
+        const reviewer = options.reviewers.recordSpawned({
+          reviewerId,
+          command: persistedCommand,
+          args: persistedArgs,
+          cwd: persistedCwd,
+          pid,
+          startedAt,
+          lastSeenAt: startedAt,
+          sessionToken: input.sessionToken ?? null,
+          createdAt,
+          updatedAt: startedAt,
+        });
+
+        options.audit.append({
+          eventType: 'reviewer.spawned',
+          createdAt: startedAt,
+          metadata: {
+            reviewerId,
+            command: persistedCommand,
+            args: persistedArgs,
+            cwd: persistedCwd,
+            pid,
+            detached: true,
+            summary: `Reviewer ${reviewerId} spawned detached with pid ${pid}.`,
+          },
+        });
+        notifyReviewerState(options.notifications);
+        child.unref();
+
+        return reviewer;
+      } catch (error) {
+        child.kill('SIGTERM');
+        throw error;
+      }
+    }
+
     // Determine log directory and create log writer if configured.
     const resolvedLogDir = input.logDir ?? options.logDir ?? null;
     const logWriter = resolvedLogDir
@@ -241,7 +286,6 @@ export function createReviewerManager(options: CreateReviewerManagerOptions): Re
       child.stdin!.end();
     }
 
-    const startedAt = now();
     let resolveStopped!: (reviewer: ReviewerRecord) => void;
     let rejectStopped!: (error: unknown) => void;
     const stopped = new Promise<ReviewerRecord>((resolve, reject) => {

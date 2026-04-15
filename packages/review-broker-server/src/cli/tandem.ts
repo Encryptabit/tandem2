@@ -129,6 +129,20 @@ function extractFlagWithEquals(args: string[], flag: string): string | undefined
 }
 
 /**
+ * Parse a standalone boolean flag from subcommand args.
+ * Returns true when present and removes the flag from args.
+ */
+function extractBooleanFlag(args: string[], flag: string): boolean {
+  const idx = args.indexOf(flag);
+  if (idx === -1) {
+    return false;
+  }
+
+  args.splice(idx, 1);
+  return true;
+}
+
+/**
  * Parse --status flag and validate against allowed values.
  */
 function extractStatusFlag(
@@ -528,6 +542,7 @@ async function handleReviewersSpawn(
   const providerFlag = extractFlagWithEquals(args, '--provider');
   const argsFlag = extractFlagWithEquals(args, '--args');
   const cwdFlag = extractFlagWithEquals(args, '--cwd');
+  const detachedFlag = extractBooleanFlag(args, '--detached');
 
   let command: string;
   let spawnArgs: string[] | undefined;
@@ -547,11 +562,21 @@ async function handleReviewersSpawn(
     throw new Error('Either --command or --provider is required for "reviewers spawn".');
   }
 
-  const response = await runtime.service.spawnReviewer({
-    command,
-    args: spawnArgs ?? [],
-    ...(cwdFlag !== undefined ? { cwd: cwdFlag } : {}),
-  });
+  const response = detachedFlag
+    ? {
+        reviewer: await runtime.context.reviewerManager.spawnReviewer({
+          command,
+          args: spawnArgs ?? [],
+          ...(cwdFlag !== undefined ? { cwd: cwdFlag } : {}),
+          detached: true,
+        }),
+        version: runtime.context.notifications.currentVersion('reviewer-state'),
+      }
+    : await runtime.service.spawnReviewer({
+        command,
+        args: spawnArgs ?? [],
+        ...(cwdFlag !== undefined ? { cwd: cwdFlag } : {}),
+      });
 
   if (options.json) {
     process.stdout.write(formatJson(response) + '\n');
@@ -564,6 +589,7 @@ async function handleReviewersSpawn(
     ['Status', r.status],
     ['Command', r.command],
     ['PID', r.pid !== null ? String(r.pid) : '—'],
+    ['Detached', detachedFlag ? 'yes' : 'no'],
   ]);
   process.stdout.write(output + '\n');
 }
@@ -980,14 +1006,15 @@ Options:
 Spawn a new reviewer process.
 
 Two modes:
-  1. Explicit: --command <cmd> [--args <a,b,c>] [--cwd <dir>]
-  2. Config:   --provider <name> (resolves command from config)
+  1. Explicit: --command <cmd> [--args <a,b,c>] [--cwd <dir>] [--detached]
+  2. Config:   --provider <name> [--detached] (resolves command from config)
 
 Options:
   --command <cmd>     Command to run (mode 1)
   --args <a,b,c>      Comma-separated arguments (mode 1)
   --cwd <dir>         Working directory for the reviewer process
   --provider <name>   Named provider from config (mode 2)
+  --detached          Leave reviewer running after tandem command exits
   --json              Output as JSON
   -h, --help          Show this help message
 `,

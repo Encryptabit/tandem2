@@ -128,6 +128,36 @@ describe('review-broker-server reviewer manager', () => {
       offlineReason: 'operator_kill',
     });
   });
+
+  it('supports detached reviewer spawn that survives context close', async () => {
+    const harness = createHarness();
+
+    const detached = await harness.context.reviewerManager.spawnReviewer({
+      reviewerId: 'reviewer-detached-1',
+      command: process.execPath,
+      args: [REVIEWER_FIXTURE_PATH],
+      cwd: 'packages/review-broker-server',
+      detached: true,
+    });
+
+    expect(detached.pid).toEqual(expect.any(Number));
+    expect(harness.context.reviewerManager.inspect()).toEqual({
+      trackedReviewerIds: [],
+      trackedPids: [],
+      listenerCounts: {},
+    });
+
+    harness.context.close();
+
+    const contextIndex = openContexts.indexOf(harness.context);
+    if (contextIndex >= 0) {
+      openContexts.splice(contextIndex, 1);
+    }
+
+    expect(() => process.kill(detached.pid!, 0)).not.toThrow();
+
+    process.kill(detached.pid!, 'SIGTERM');
+  });
 });
 
 function createHarness(): { context: AppContext } {
