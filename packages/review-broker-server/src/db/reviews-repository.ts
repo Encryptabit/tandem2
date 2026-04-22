@@ -217,6 +217,21 @@ export function createReviewsRepository(db: Database.Database): ReviewsRepositor
     WHERE review_id = ?
   `);
 
+  const countByStatusStatement = db.prepare<{ status: ReviewStatus }, { count: number }>(`
+    SELECT COUNT(*) as count FROM reviews WHERE status = @status
+  `);
+
+  // Statement cache for dynamic SQL (updateAndReload, list) — avoids recompilation on every call
+  const stmtCache = new Map<string, ReturnType<typeof db.prepare>>();
+  function cachedPrepare(sql: string) {
+    let stmt = stmtCache.get(sql);
+    if (!stmt) {
+      stmt = db.prepare(sql);
+      stmtCache.set(sql, stmt);
+    }
+    return stmt;
+  }
+
   function getById(reviewId: string): ReviewRecord | null {
     const row = getByIdStatement.get(reviewId);
     return row ? mapReviewRow(row) : null;
@@ -310,7 +325,7 @@ export function createReviewsRepository(db: Database.Database): ReviewsRepositor
       params.expectedClaimedBy = input.expectedClaimedBy ?? null;
     }
 
-    const result = db.prepare(sql).run(params);
+    const result = cachedPrepare(sql).run(params);
 
     if (result.changes === 0) {
       return null;
@@ -373,27 +388,21 @@ export function createReviewsRepository(db: Database.Database): ReviewsRepositor
         params.limit = options.limit;
       }
 
-      const rows = db
-        .prepare<unknown[], ReviewRow>(`
+      const sql = `
           SELECT
             ${REVIEW_SELECT_COLUMNS}
           FROM reviews
           ${whereClause}
           ORDER BY created_at DESC, review_id DESC
           ${limitClause}
-        `)
-        .all(params);
+        `;
+      const rows = cachedPrepare(sql).all(params) as ReviewRow[];
 
       return rows.map((row) => mapReviewSummaryRow(row));
     },
 
     countByStatus(status) {
-      const row = db
-        .prepare<{ status: ReviewStatus }, { count: number }>(`
-          SELECT COUNT(*) as count FROM reviews WHERE status = @status
-        `)
-        .get({ status });
-
+      const row = countByStatusStatement.get({ status });
       return row?.count ?? 0;
     },
 

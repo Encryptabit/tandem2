@@ -67,6 +67,8 @@ export const POOL_AUDIT_EVENT_TYPES = [
   'pool.dead_process_reaped',
   'pool.claim_timeout',
   'pool.stale_session_terminated',
+  'pool.reactive_scale_error',
+  'pool.background_check_error',
 ] as const;
 
 export type PoolAuditEventType = (typeof POOL_AUDIT_EVENT_TYPES)[number];

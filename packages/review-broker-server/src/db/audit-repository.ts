@@ -96,6 +96,55 @@ export function createAuditRepository(db: Database.Database): AuditRepository {
     WHERE audit_event_id = ?
   `);
 
+  const listForReviewStatement = db.prepare<string[], AuditEventRow>(`
+    SELECT
+      ${AUDIT_SELECT_COLUMNS}
+    FROM audit_events
+    WHERE review_id = ?
+    ORDER BY created_at ASC, audit_event_id ASC
+  `);
+
+  const listActivityWithLimitStatement = db.prepare<Record<string, number | string>, AuditEventRow>(`
+    SELECT
+      ${AUDIT_SELECT_COLUMNS}
+    FROM (
+      SELECT
+        ${AUDIT_SELECT_COLUMNS}
+      FROM audit_events
+      WHERE review_id = @reviewId
+      ORDER BY created_at DESC, audit_event_id DESC
+      LIMIT @limit
+    )
+    ORDER BY created_at ASC, audit_event_id ASC
+  `);
+
+  const listActivityStatement = db.prepare<Record<string, number | string>, AuditEventRow>(`
+    SELECT
+      ${AUDIT_SELECT_COLUMNS}
+    FROM audit_events
+    WHERE review_id = @reviewId
+    ORDER BY created_at ASC, audit_event_id ASC
+  `);
+
+  const getLatestForReviewStatement = db.prepare<string[], AuditEventRow>(`
+    SELECT
+      ${AUDIT_SELECT_COLUMNS}
+    FROM audit_events
+    WHERE review_id = ?
+    ORDER BY created_at DESC, audit_event_id DESC
+    LIMIT 1
+  `);
+
+  const listGlobalStatement = db.prepare<Record<string, number | string | null>, AuditEventRow>(`
+    SELECT
+      ${AUDIT_SELECT_COLUMNS}
+    FROM audit_events
+    WHERE (audit_event_id < @beforeId OR @beforeId IS NULL)
+      AND (event_type = @eventType OR @eventType IS NULL)
+    ORDER BY created_at DESC, audit_event_id DESC
+    LIMIT @limit
+  `);
+
   return {
     append(input) {
       const result = insertStatement.run({
@@ -119,16 +168,7 @@ export function createAuditRepository(db: Database.Database): AuditRepository {
     },
 
     listForReview(reviewId) {
-      const rows = db
-        .prepare<string[], AuditEventRow>(`
-          SELECT
-            ${AUDIT_SELECT_COLUMNS}
-          FROM audit_events
-          WHERE review_id = ?
-          ORDER BY created_at ASC, audit_event_id ASC
-        `)
-        .all(reviewId);
-
+      const rows = listForReviewStatement.all(reviewId);
       return rows.map((row) => mapAuditEventRow(row));
     },
 
@@ -136,30 +176,8 @@ export function createAuditRepository(db: Database.Database): AuditRepository {
       const params: Record<string, number | string> = { reviewId };
 
       const rows = options.limit
-        ? db
-            .prepare<Record<string, number | string>, AuditEventRow>(`
-              SELECT
-                ${AUDIT_SELECT_COLUMNS}
-              FROM (
-                SELECT
-                  ${AUDIT_SELECT_COLUMNS}
-                FROM audit_events
-                WHERE review_id = @reviewId
-                ORDER BY created_at DESC, audit_event_id DESC
-                LIMIT @limit
-              )
-              ORDER BY created_at ASC, audit_event_id ASC
-            `)
-            .all({ ...params, limit: options.limit })
-        : db
-            .prepare<Record<string, number | string>, AuditEventRow>(`
-              SELECT
-                ${AUDIT_SELECT_COLUMNS}
-              FROM audit_events
-              WHERE review_id = @reviewId
-              ORDER BY created_at ASC, audit_event_id ASC
-            `)
-            .all(params);
+        ? listActivityWithLimitStatement.all({ ...params, limit: options.limit })
+        : listActivityStatement.all(params);
 
       return rows
         .map((row) => mapActivityRow(row))
@@ -167,17 +185,7 @@ export function createAuditRepository(db: Database.Database): AuditRepository {
     },
 
     getLatestForReview(reviewId) {
-      const row = db
-        .prepare<string[], AuditEventRow>(`
-          SELECT
-            ${AUDIT_SELECT_COLUMNS}
-          FROM audit_events
-          WHERE review_id = ?
-          ORDER BY created_at DESC, audit_event_id DESC
-          LIMIT 1
-        `)
-        .get(reviewId);
-
+      const row = getLatestForReviewStatement.get(reviewId);
       return row ? mapAuditEventRow(row) : null;
     },
 
@@ -190,18 +198,7 @@ export function createAuditRepository(db: Database.Database): AuditRepository {
         limit,
       };
 
-      const rows = db
-        .prepare<Record<string, number | string | null>, AuditEventRow>(`
-          SELECT
-            ${AUDIT_SELECT_COLUMNS}
-          FROM audit_events
-          WHERE (audit_event_id < @beforeId OR @beforeId IS NULL)
-            AND (event_type = @eventType OR @eventType IS NULL)
-          ORDER BY created_at DESC, audit_event_id DESC
-          LIMIT @limit
-        `)
-        .all(params);
-
+      const rows = listGlobalStatement.all(params);
       return rows.map((row) => mapAuditEventRow(row));
     },
   };

@@ -47,6 +47,7 @@ const listRoot = document.getElementById('events-list') as HTMLElement;
 // State
 // ---------------------------------------------------------------------------
 
+const MAX_EVENTS = 500;
 let events: OperatorEventEntry[] = [];
 let hasMore = false;
 let oldestEventId: number | null = null;
@@ -198,6 +199,7 @@ async function fetchLatest(): Promise<void> {
   }
   if (prepended > 0) {
     events = [...newEvents, ...events];
+    if (events.length > MAX_EVENTS) events.length = MAX_EVENTS;
     renderEventList();
   }
 }
@@ -239,13 +241,6 @@ function renderFilterBar(): void {
       ).join('')}
       <span class="live-indicator" id="live-dot"><span class="pulse-dot"></span> Live</span>
     </div>`;
-
-  // Bind click handlers
-  for (const btn of filterRoot.querySelectorAll<HTMLButtonElement>('.filter-chip')) {
-    btn.addEventListener('click', () => {
-      setFilter(btn.dataset.filter as FilterGroup);
-    });
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -267,15 +262,6 @@ function renderEventList(): void {
       : '';
 
   listRoot.innerHTML = rows + loadMoreBtn;
-
-  const btn = document.getElementById('load-more-btn');
-  if (btn) {
-    btn.addEventListener('click', () => {
-      btn.textContent = 'Loading…';
-      btn.setAttribute('disabled', 'true');
-      loadMore();
-    });
-  }
 }
 
 function renderEventRow(entry: OperatorEventEntry): string {
@@ -339,6 +325,21 @@ function escapeHtml(text: string): string {
 // ---------------------------------------------------------------------------
 // Boot
 // ---------------------------------------------------------------------------
+
+// Event delegation — single listeners on stable parent containers
+filterRoot.addEventListener('click', (e) => {
+  const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('.filter-chip');
+  if (btn?.dataset.filter) setFilter(btn.dataset.filter as FilterGroup);
+});
+
+listRoot.addEventListener('click', (e) => {
+  const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('.load-more-btn');
+  if (btn && !btn.hasAttribute('disabled')) {
+    btn.textContent = 'Loading…';
+    btn.setAttribute('disabled', 'true');
+    loadMore();
+  }
+});
 
 renderFilterBar();
 loadInitial();

@@ -242,6 +242,46 @@ export function createReviewersRepository(db: Database.Database): ReviewersRepos
     WHERE reviewer_id = ?
   `);
 
+  const markOfflineStatement = db.prepare(`
+    UPDATE reviewers
+    SET
+      pid = NULL,
+      last_seen_at = @lastSeenAt,
+      offline_at = @offlineAt,
+      offline_reason = @offlineReason,
+      exit_code = @exitCode,
+      exit_signal = @exitSignal,
+      updated_at = @updatedAt
+    WHERE reviewer_id = @reviewerId
+  `);
+
+  const markDrainingStatement = db.prepare(`
+    UPDATE reviewers
+    SET
+      draining_at = @drainingAt,
+      updated_at = @updatedAt
+    WHERE reviewer_id = @reviewerId
+  `);
+
+  const touchStatement = db.prepare(`
+    UPDATE reviewers
+    SET
+      last_seen_at = @lastSeenAt,
+      updated_at = @updatedAt
+    WHERE reviewer_id = @reviewerId
+  `);
+
+  // Statement cache for dynamic SQL (list) — avoids recompilation on every call
+  const stmtCache = new Map<string, ReturnType<typeof db.prepare>>();
+  function cachedPrepare(sql: string) {
+    let stmt = stmtCache.get(sql);
+    if (!stmt) {
+      stmt = db.prepare(sql);
+      stmtCache.set(sql, stmt);
+    }
+    return stmt;
+  }
+
   function getById(reviewerId: string): ReviewerRecord | null {
     const row = getByIdStatement.get(reviewerId);
     return row ? mapReviewerRow(row) : null;
@@ -292,20 +332,7 @@ export function createReviewersRepository(db: Database.Database): ReviewersRepos
     },
 
     markOffline(input) {
-      const result = db
-        .prepare(`
-          UPDATE reviewers
-          SET
-            pid = NULL,
-            last_seen_at = @lastSeenAt,
-            offline_at = @offlineAt,
-            offline_reason = @offlineReason,
-            exit_code = @exitCode,
-            exit_signal = @exitSignal,
-            updated_at = @updatedAt
-          WHERE reviewer_id = @reviewerId
-        `)
-        .run({
+      const result = markOfflineStatement.run({
           reviewerId: input.reviewerId,
           lastSeenAt: input.lastSeenAt ?? input.offlineAt,
           offlineAt: input.offlineAt,
@@ -323,15 +350,7 @@ export function createReviewersRepository(db: Database.Database): ReviewersRepos
     },
 
     markDraining(input) {
-      const result = db
-        .prepare(`
-          UPDATE reviewers
-          SET
-            draining_at = @drainingAt,
-            updated_at = @updatedAt
-          WHERE reviewer_id = @reviewerId
-        `)
-        .run({
+      const result = markDrainingStatement.run({
           reviewerId: input.reviewerId,
           drainingAt: input.drainingAt,
           updatedAt: input.updatedAt,
@@ -345,15 +364,7 @@ export function createReviewersRepository(db: Database.Database): ReviewersRepos
     },
 
     touch(input) {
-      const result = db
-        .prepare(`
-          UPDATE reviewers
-          SET
-            last_seen_at = @lastSeenAt,
-            updated_at = @updatedAt
-          WHERE reviewer_id = @reviewerId
-        `)
-        .run({
+      const result = touchStatement.run({
           reviewerId: input.reviewerId,
           lastSeenAt: input.lastSeenAt,
           updatedAt: input.updatedAt,
@@ -381,16 +392,15 @@ export function createReviewersRepository(db: Database.Database): ReviewersRepos
         params.limit = options.limit;
       }
 
-      const rows = db
-        .prepare<Record<string, number | ReviewerStatus>, ReviewerRow>(`
+      const sql = `
           SELECT
             ${REVIEWER_SELECT_COLUMNS}
           ${REVIEWER_STATE_CTE}
           ${whereClause}
           ORDER BY updated_at DESC, reviewer_id DESC
           ${limitClause}
-        `)
-        .all(params);
+        `;
+      const rows = cachedPrepare(sql).all(params) as ReviewerRow[];
 
       return rows.map((row) => mapReviewerRow(row));
     },

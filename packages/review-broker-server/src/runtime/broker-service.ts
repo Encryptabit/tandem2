@@ -168,7 +168,16 @@ export function createBrokerService(context: AppContext, options: CreateBrokerSe
   function triggerReactiveScaling(): void {
     if (poolManagerRef) {
       setImmediate(() => {
-        poolManagerRef!.reactiveScale().catch(() => {});
+        poolManagerRef!.reactiveScale().catch((err) => {
+          context.audit.append({
+            eventType: 'pool.reactive_scale_error',
+            createdAt: now(),
+            metadata: {
+              error: err instanceof Error ? err.message : String(err),
+              summary: 'Reactive scaling failed unexpectedly.',
+            },
+          });
+        });
       });
     }
   }
@@ -283,7 +292,10 @@ export function createBrokerService(context: AppContext, options: CreateBrokerSe
       }
 
       return parseWithSchema(ListReviewsResponseSchema, {
-        reviews: context.reviews.list(buildListReviewsOptions(request)),
+        reviews: context.reviews.list({
+          ...(request.status !== undefined ? { status: request.status } : {}),
+          ...(request.limit !== undefined ? { limit: request.limit } : {}),
+        }),
         version: currentQueueVersion(context),
       });
     },
@@ -315,7 +327,10 @@ export function createBrokerService(context: AppContext, options: CreateBrokerSe
       }
 
       return parseWithSchema(ListReviewersResponseSchema, {
-        reviewers: context.reviewers.list(buildListReviewersOptions(request)),
+        reviewers: context.reviewers.list({
+          ...(request.status !== undefined ? { status: request.status } : {}),
+          ...(request.limit !== undefined ? { limit: request.limit } : {}),
+        }),
         version: currentReviewerVersion(context),
       });
     },
@@ -1209,19 +1224,6 @@ function buildWaitForChangeOptions(timeoutMs: number | undefined): { timeoutMs?:
   return timeoutMs !== undefined ? { timeoutMs } : {};
 }
 
-function buildListReviewsOptions(request: ListReviewsRequest): { status?: ReviewRecord['status']; limit?: number } {
-  return {
-    ...(request.status !== undefined ? { status: request.status } : {}),
-    ...(request.limit !== undefined ? { limit: request.limit } : {}),
-  };
-}
-
-function buildListReviewersOptions(request: ListReviewersRequest): { status?: ReviewerStatus; limit?: number } {
-  return {
-    ...(request.status !== undefined ? { status: request.status } : {}),
-    ...(request.limit !== undefined ? { limit: request.limit } : {}),
-  };
-}
 
 function buildActivityFeedOptions(request: GetActivityFeedRequest): { limit?: number } {
   return request.limit !== undefined ? { limit: request.limit } : {};
