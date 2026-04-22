@@ -122,31 +122,6 @@ export function createPoolManager(options: CreatePoolManagerOptions): PoolManage
   // Reactive scaling
   // -------------------------------------------------------------------------
 
-  function countRapidPoolExits(allReviewers: ReviewerRecord[], now: string): number {
-    const nowMs = Date.parse(now);
-    const windowMs = SPAWN_CIRCUIT_BREAKER_WINDOW_SECONDS * 1000;
-
-    if (!Number.isFinite(nowMs)) {
-      return 0;
-    }
-
-    return allReviewers.filter((reviewer) => {
-      if (reviewer.sessionToken !== sessionToken) {
-        return false;
-      }
-      if (reviewer.offlineReason !== 'reviewer_exit' || reviewer.offlineAt === null) {
-        return false;
-      }
-
-      const offlineMs = Date.parse(reviewer.offlineAt);
-      if (!Number.isFinite(offlineMs)) {
-        return false;
-      }
-
-      return nowMs - offlineMs <= windowMs;
-    }).length;
-  }
-
   function isSpawnPaused(now: string): boolean {
     if (spawnPausedUntil === null) {
       return false;
@@ -155,11 +130,9 @@ export function createPoolManager(options: CreatePoolManagerOptions): PoolManage
     return Date.parse(now) < Date.parse(spawnPausedUntil);
   }
 
-  function maybeOpenSpawnCircuit(allReviewers: ReviewerRecord[], now: string): number {
-    const rapidExitCount = countRapidPoolExits(allReviewers, now);
-
+  function maybeOpenSpawnCircuit(rapidExitCount: number, now: string): void {
     if (rapidExitCount < SPAWN_CIRCUIT_BREAKER_EXIT_THRESHOLD || isSpawnPaused(now)) {
-      return rapidExitCount;
+      return;
     }
 
     const pausedUntil = new Date(Date.parse(now) + SPAWN_CIRCUIT_BREAKER_PAUSE_SECONDS * 1000).toISOString();
@@ -180,8 +153,6 @@ export function createPoolManager(options: CreatePoolManagerOptions): PoolManage
           `${rapidExitCount} reviewer exits in ${SPAWN_CIRCUIT_BREAKER_WINDOW_SECONDS}s.`,
       },
     });
-
-    return rapidExitCount;
   }
 
   async function reactiveScale(): Promise<void> {
@@ -194,11 +165,33 @@ export function createPoolManager(options: CreatePoolManagerOptions): PoolManage
       const now = getNow();
       const pendingCount = reviews.countByStatus('pending');
       const allReviewers = reviewers.list();
-      const activeCount = allReviewers.filter(
-        (r: ReviewerRecord) => r.status === 'idle' || r.status === 'assigned',
-      ).length;
-      const drainingCount = allReviewers.filter((r: ReviewerRecord) => r.status === 'draining').length;
-      const rapidExitCount = maybeOpenSpawnCircuit(allReviewers, now);
+
+      // Single-pass tallying over the reviewer list
+      let activeCount = 0;
+      let drainingCount = 0;
+      let rapidExitCount = 0;
+      const nowMs = Date.parse(now);
+      const windowMs = SPAWN_CIRCUIT_BREAKER_WINDOW_SECONDS * 1000;
+
+      for (const r of allReviewers) {
+        if (r.status === 'idle' || r.status === 'assigned') {
+          activeCount++;
+        } else if (r.status === 'draining') {
+          drainingCount++;
+        }
+        if (
+          r.sessionToken === sessionToken &&
+          r.offlineReason === 'reviewer_exit' &&
+          r.offlineAt !== null
+        ) {
+          const offlineMs = Date.parse(r.offlineAt);
+          if (Number.isFinite(offlineMs) && Number.isFinite(nowMs) && nowMs - offlineMs <= windowMs) {
+            rapidExitCount++;
+          }
+        }
+      }
+
+      maybeOpenSpawnCircuit(rapidExitCount, now);
 
       if (isSpawnPaused(now)) {
         return;
@@ -221,14 +214,16 @@ export function createPoolManager(options: CreatePoolManagerOptions): PoolManage
       });
 
       if (result.spawnCount > 0) {
-        for (let i = 0; i < result.spawnCount; i++) {
-          await reviewerManager.spawnReviewer({
-            command: spawnCommand,
-            args: spawnArgs,
-            ...(logDir ? { logDir } : {}),
-            sessionToken,
-          });
-        }
+        await Promise.all(
+          Array.from({ length: result.spawnCount }, () =>
+            reviewerManager.spawnReviewer({
+              command: spawnCommand,
+              args: spawnArgs,
+              ...(logDir ? { logDir } : {}),
+              sessionToken,
+            }),
+          ),
+        );
         lastSpawnAt = getNow();
 
         audit.append({
@@ -290,10 +285,9 @@ export function createPoolManager(options: CreatePoolManagerOptions): PoolManage
 
   function checkTtlExpiry(): void {
     const now = getNow();
-    const candidates = [
-      ...reviewers.list({ status: 'idle' }),
-      ...reviewers.list({ status: 'assigned' }),
-    ];
+    const candidates = reviewers.list().filter(
+      (r) => r.status === 'idle' || r.status === 'assigned',
+    );
 
     for (const reviewer of candidates) {
       if (!reviewer.startedAt) continue;
@@ -324,10 +318,13 @@ export function createPoolManager(options: CreatePoolManagerOptions): PoolManage
 
   async function checkDrainCompletion(): Promise<void> {
     const drainingReviewers = reviewers.list({ status: 'draining' });
+    const completable = drainingReviewers.filter((r) => r.currentReviewId === null);
 
-    for (const reviewer of drainingReviewers) {
-      if (reviewer.currentReviewId === null) {
-        const now = getNow();
+    if (completable.length === 0) return;
+
+    const now = getNow();
+    await Promise.all(
+      completable.map(async (reviewer) => {
         await reviewerManager.stopReviewer(reviewer.reviewerId, {
           offlineReason: 'pool_drain',
         });
@@ -340,8 +337,8 @@ export function createPoolManager(options: CreatePoolManagerOptions): PoolManage
             summary: `Reviewer ${reviewer.reviewerId} drain completed: no open reviews, terminated.`,
           },
         });
-      }
-    }
+      }),
+    );
   }
 
   function checkClaimTimeouts(): void {
@@ -382,10 +379,13 @@ export function createPoolManager(options: CreatePoolManagerOptions): PoolManage
 
   async function reapDeadProcesses(): Promise<void> {
     const trackedIds = reviewerManager.getTrackedReviewerIds();
+    const deadIds = trackedIds.filter((id) => !reviewerManager.isProcessAlive(id));
 
-    for (const reviewerId of trackedIds) {
-      if (!reviewerManager.isProcessAlive(reviewerId)) {
-        const now = getNow();
+    if (deadIds.length === 0) return;
+
+    const now = getNow();
+    await Promise.all(
+      deadIds.map(async (reviewerId) => {
         await reviewerManager.stopReviewer(reviewerId);
 
         audit.append({
@@ -396,8 +396,8 @@ export function createPoolManager(options: CreatePoolManagerOptions): PoolManage
             summary: `Dead process reaped for reviewer ${reviewerId}.`,
           },
         });
-      }
-    }
+      }),
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -405,12 +405,12 @@ export function createPoolManager(options: CreatePoolManagerOptions): PoolManage
   // -------------------------------------------------------------------------
 
   async function runAllChecks(): Promise<void> {
-    await reactiveScale();
+    // Run scaling and reaping in parallel (independent), then synchronous checks
+    await Promise.all([reactiveScale(), reapDeadProcesses()]);
     checkIdleTimeouts();
     checkTtlExpiry();
     await checkDrainCompletion();
     checkClaimTimeouts();
-    await reapDeadProcesses();
   }
 
   function startBackgroundLoop(): void {
@@ -419,7 +419,16 @@ export function createPoolManager(options: CreatePoolManagerOptions): PoolManage
     }
 
     intervalHandle = setInterval(() => {
-      void runAllChecks();
+      runAllChecks().catch((err) => {
+        audit.append({
+          eventType: 'pool.background_check_error',
+          createdAt: getNow(),
+          metadata: {
+            error: err instanceof Error ? err.message : String(err),
+            summary: 'Pool background check failed unexpectedly.',
+          },
+        });
+      });
     }, poolConfig.background_check_interval_seconds * 1000);
   }
 

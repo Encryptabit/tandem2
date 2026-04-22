@@ -1,5 +1,7 @@
 import { defineConfig } from 'tsup';
 
+const isProd = process.env.NODE_ENV === 'production';
+
 export default defineConfig([
   {
     entry: {
@@ -13,10 +15,10 @@ export default defineConfig([
     outDir: 'dist',
     clean: true,
     splitting: true,
-    sourcemap: true,
+    sourcemap: !isProd,
+    minify: isProd,
     dts: false,
-    noExternal: ['review-broker-core'],
-    external: ['@gsd/pi-agent-core', '@gsd/pi-ai'],
+    external: ['review-broker-core', '@gsd/pi-agent-core', '@gsd/pi-ai'],
   },
   {
     entry: { index: 'src/index.ts' },
@@ -25,9 +27,9 @@ export default defineConfig([
     platform: 'node',
     outDir: 'dist',
     clean: false,
-    sourcemap: true,
+    sourcemap: !isProd,
+    minify: isProd,
     dts: false,
-    noExternal: ['review-broker-core'],
-    external: ['@gsd/pi-agent-core', '@gsd/pi-ai'],
+    external: ['review-broker-core', '@gsd/pi-agent-core', '@gsd/pi-ai'],
   },
 ]);

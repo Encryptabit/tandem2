@@ -550,8 +550,16 @@ export function createReviewerManager(options: CreateReviewerManagerOptions): Re
   };
 }
 
+const SPAWN_TIMEOUT_MS = 10_000;
+
 async function awaitSpawn(child: ChildProcess): Promise<void> {
   await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      child.kill('SIGTERM');
+      reject(new Error(`Spawn timed out after ${SPAWN_TIMEOUT_MS}ms`));
+    }, SPAWN_TIMEOUT_MS);
+
     const onSpawn = () => {
       cleanup();
       resolve();
@@ -561,6 +569,7 @@ async function awaitSpawn(child: ChildProcess): Promise<void> {
       reject(error);
     };
     const cleanup = () => {
+      clearTimeout(timer);
       child.off('spawn', onSpawn);
       child.off('error', onError);
     };
@@ -584,7 +593,7 @@ function sanitizeArg(argument: string, workspaceRoot: string): string {
 }
 
 function normalizePath(value: string): string {
-  return value.split(path.sep).join('/');
+  return value.replaceAll(path.sep, '/');
 }
 
 function notifyReviewerState(notifications: { notify: (topic: string) => number } | undefined): void {

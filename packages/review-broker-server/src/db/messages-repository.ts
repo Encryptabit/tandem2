@@ -76,9 +76,34 @@ export function createMessagesRepository(db: Database.Database): MessagesReposit
     WHERE message_id = ?
   `);
 
-  function getLatestBySql(sql: string, params: Record<string, number | string>): StoredReviewMessage | null {
-    const row = db.prepare<Record<string, number | string>, MessageRow>(sql).get(params);
-    return row ? mapMessageRow(row) : null;
+  const getLatestForReviewStatement = db.prepare<Record<string, number | string>, MessageRow>(`
+    SELECT
+      ${MESSAGE_SELECT_COLUMNS}
+    FROM messages
+    WHERE review_id = @reviewId
+    ORDER BY created_at DESC, message_id DESC
+    LIMIT 1
+  `);
+
+  const getLatestForRoundStatement = db.prepare<Record<string, number | string>, MessageRow>(`
+    SELECT
+      ${MESSAGE_SELECT_COLUMNS}
+    FROM messages
+    WHERE review_id = @reviewId
+      AND round_number = @roundNumber
+    ORDER BY created_at DESC, message_id DESC
+    LIMIT 1
+  `);
+
+  // Statement cache for dynamic SQL (listForReview) — avoids recompilation on every call
+  const stmtCache = new Map<string, ReturnType<typeof db.prepare>>();
+  function cachedPrepare(sql: string) {
+    let stmt = stmtCache.get(sql);
+    if (!stmt) {
+      stmt = db.prepare(sql);
+      stmtCache.set(sql, stmt);
+    }
+    return stmt;
   }
 
   return {
@@ -115,47 +140,27 @@ export function createMessagesRepository(db: Database.Database): MessagesReposit
         params.limit = options.limit;
       }
 
-      const rows = db
-        .prepare<Record<string, number | string>, MessageRow>(`
+      const sql = `
           SELECT
             ${MESSAGE_SELECT_COLUMNS}
           FROM messages
           WHERE ${clauses.join(' AND ')}
           ORDER BY created_at ASC, message_id ASC
           ${limitClause}
-        `)
-        .all(params);
+        `;
+      const rows = cachedPrepare(sql).all(params) as MessageRow[];
 
       return rows.map((row) => mapMessageRow(row));
     },
 
     getLatestForReview(reviewId) {
-      return getLatestBySql(
-        `
-          SELECT
-            ${MESSAGE_SELECT_COLUMNS}
-          FROM messages
-          WHERE review_id = @reviewId
-          ORDER BY created_at DESC, message_id DESC
-          LIMIT 1
-        `,
-        { reviewId },
-      );
+      const row = getLatestForReviewStatement.get({ reviewId });
+      return row ? mapMessageRow(row) : null;
     },
 
     getLatestForRound(reviewId, roundNumber) {
-      return getLatestBySql(
-        `
-          SELECT
-            ${MESSAGE_SELECT_COLUMNS}
-          FROM messages
-          WHERE review_id = @reviewId
-            AND round_number = @roundNumber
-          ORDER BY created_at DESC, message_id DESC
-          LIMIT 1
-        `,
-        { reviewId, roundNumber },
-      );
+      const row = getLatestForRoundStatement.get({ reviewId, roundNumber });
+      return row ? mapMessageRow(row) : null;
     },
   };
 }

@@ -16,6 +16,7 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
+    "incremental": true,
     "types": ["node"],
     "baseUrl": ".",
     "paths": {

@@ -240,7 +240,12 @@ async function serveStaticAsset(distPath: string, pathname: string, res: ServerR
     const content = await readFile(filePath);
     const mimeType = getMimeType(filePath);
 
-    res.writeHead(200, { 'Content-Type': mimeType, 'Cache-Control': 'no-cache' });
+    // Content-hashed filenames (e.g. *.abc123.js) are immutable — cache aggressively
+    const fileName = path.basename(filePath);
+    const isHashed = /\.[a-f0-9]{8,}\.\w+$/.test(fileName);
+    const cacheControl = isHashed ? 'public, max-age=31536000, immutable' : 'no-cache';
+
+    res.writeHead(200, { 'Content-Type': mimeType, 'Cache-Control': cacheControl });
     res.end(content);
   } catch {
     res.writeHead(404, { 'Content-Type': 'text/plain' });

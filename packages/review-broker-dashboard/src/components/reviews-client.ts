@@ -259,7 +259,6 @@ function renderListView(): void {
     reviewsRoot.innerHTML = `
       ${filterBar}
       <div class="empty-state">No reviews${activeStatusFilter !== 'all' ? ` with status "${activeStatusFilter}"` : ''}</div>`;
-    bindFilterChips();
     return;
   }
 
@@ -272,18 +271,6 @@ function renderListView(): void {
     ${filterBar}
     <div class="review-list">${rows}</div>
     ${loadMoreBtn}`;
-
-  bindFilterChips();
-  bindReviewRows();
-
-  const moreBtn = document.getElementById('load-more-btn');
-  if (moreBtn) {
-    moreBtn.addEventListener('click', () => {
-      moreBtn.textContent = 'Loading…';
-      moreBtn.setAttribute('disabled', 'true');
-      fetchList();
-    });
-  }
 }
 
 function renderReviewRow(review: DashboardReviewListItem): string {
@@ -305,22 +292,6 @@ function renderReviewRow(review: DashboardReviewListItem): string {
     </div>`;
 }
 
-function bindFilterChips(): void {
-  for (const btn of reviewsRoot.querySelectorAll<HTMLButtonElement>('.filter-chip')) {
-    btn.addEventListener('click', () => {
-      setStatusFilter(btn.dataset.filter as StatusFilter);
-    });
-  }
-}
-
-function bindReviewRows(): void {
-  for (const row of reviewsRoot.querySelectorAll<HTMLElement>('.review-row')) {
-    row.addEventListener('click', () => {
-      const reviewId = row.dataset.reviewId;
-      if (reviewId) navigateToDetail(reviewId);
-    });
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Rendering — detail view
@@ -390,14 +361,6 @@ function renderDetailView(detail: ReviewDetailResponse): void {
     ${proposalSection}
     ${discussionSection}
     ${activitySection}`;
-
-  const backBtn = document.getElementById('back-to-list');
-  if (backBtn) {
-    backBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      navigateToList();
-    });
-  }
 }
 
 function renderDiscussionEntry(msg: ReviewDiscussionMessage): string {
@@ -531,6 +494,42 @@ function escapeHtml(text: string): string {
 // ---------------------------------------------------------------------------
 // Boot
 // ---------------------------------------------------------------------------
+
+// Event delegation — single listener on the stable parent container
+reviewsRoot.addEventListener('click', (e) => {
+  const target = e.target as HTMLElement;
+
+  // Filter chip
+  const chip = target.closest<HTMLButtonElement>('.filter-chip');
+  if (chip?.dataset.filter) {
+    setStatusFilter(chip.dataset.filter as StatusFilter);
+    return;
+  }
+
+  // Review row → navigate to detail
+  const row = target.closest<HTMLElement>('.review-row');
+  if (row?.dataset.reviewId) {
+    navigateToDetail(row.dataset.reviewId);
+    return;
+  }
+
+  // Load more button
+  const moreBtn = target.closest<HTMLButtonElement>('.load-more-btn');
+  if (moreBtn && !moreBtn.hasAttribute('disabled')) {
+    moreBtn.textContent = 'Loading…';
+    moreBtn.setAttribute('disabled', 'true');
+    fetchList();
+    return;
+  }
+
+  // Back to list link
+  const backLink = target.closest<HTMLAnchorElement>('#back-to-list');
+  if (backLink) {
+    e.preventDefault();
+    navigateToList();
+    return;
+  }
+});
 
 function init(): void {
   const reviewId = getActiveReviewId();

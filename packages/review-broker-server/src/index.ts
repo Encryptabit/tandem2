@@ -529,127 +529,88 @@ function recoverReviewerAssignmentsSynchronously(
   };
 }
 
-export function inspectBrokerRuntime(context: AppContext): BrokerRuntimeSnapshot {
-  const readCount = (tableName: 'reviews' | 'messages' | 'audit_events' | 'schema_migrations'): number => {
-    const row = context.db.prepare<unknown[], { count: number }>(`SELECT COUNT(*) as count FROM ${tableName}`).get();
-    return row?.count ?? 0;
+// Cached prepared statements for inspectBrokerRuntime — keyed by db instance
+const inspectorStmtCache = new WeakMap<object, ReturnType<typeof buildInspectorStatements>>();
+
+function buildInspectorStatements(db: AppContext['db']) {
+  return {
+    countReviews: db.prepare<unknown[], { count: number }>('SELECT COUNT(*) as count FROM reviews'),
+    countMessages: db.prepare<unknown[], { count: number }>('SELECT COUNT(*) as count FROM messages'),
+    countAuditEvents: db.prepare<unknown[], { count: number }>('SELECT COUNT(*) as count FROM audit_events'),
+    countMigrations: db.prepare<unknown[], { count: number }>('SELECT COUNT(*) as count FROM schema_migrations'),
+    statusCounts: db.prepare<unknown[], { status: ReviewStatus; count: number }>(
+      'SELECT status, COUNT(*) as count FROM reviews GROUP BY status ORDER BY status ASC',
+    ),
+    counterPatchStatusCounts: db.prepare<unknown[], { counter_patch_status: CounterPatchStatus; count: number }>(
+      'SELECT counter_patch_status, COUNT(*) as count FROM reviews GROUP BY counter_patch_status ORDER BY counter_patch_status ASC',
+    ),
+    latestReview: db.prepare<unknown[], {
+      review_id: string; status: ReviewStatus; current_round: number;
+      latest_verdict: ReviewVerdict | null; verdict_reason: string | null;
+      counter_patch_status: CounterPatchStatus; last_message_at: string | null; last_activity_at: string | null;
+    }>(`
+      SELECT review_id, status, current_round, latest_verdict, verdict_reason,
+        counter_patch_status, last_message_at, last_activity_at
+      FROM reviews ORDER BY updated_at DESC, review_id DESC LIMIT 1
+    `),
+    latestMessage: db.prepare<unknown[], {
+      review_id: string; author_id: string; author_role: ReviewMessageAuthorRole; created_at: string;
+    }>(`
+      SELECT review_id, author_id, author_role, created_at
+      FROM messages ORDER BY created_at DESC, message_id DESC LIMIT 1
+    `),
+    latestAuditEvent: db.prepare<unknown[], {
+      review_id: string | null; event_type: AuditEventType; error_code: string | null;
+      metadata_json: string; created_at: string;
+    }>(`
+      SELECT review_id, event_type, error_code, metadata_json, created_at
+      FROM audit_events ORDER BY created_at DESC, audit_event_id DESC LIMIT 1
+    `),
   };
+}
+
+function getInspectorStmts(db: AppContext['db']) {
+  let stmts = inspectorStmtCache.get(db);
+  if (!stmts) {
+    stmts = buildInspectorStatements(db);
+    inspectorStmtCache.set(db, stmts);
+  }
+  return stmts;
+}
+
+export function inspectBrokerRuntime(context: AppContext): BrokerRuntimeSnapshot {
+  const stmts = getInspectorStmts(context.db);
 
   const statusCounts = Object.fromEntries(
-    context.db
-      .prepare<unknown[], { status: ReviewStatus; count: number }>(
-        'SELECT status, COUNT(*) as count FROM reviews GROUP BY status ORDER BY status ASC',
-      )
-      .all()
-      .map((row) => [row.status, row.count]),
+    stmts.statusCounts.all().map((row) => [row.status, row.count]),
   ) as Partial<Record<ReviewStatus, number>>;
 
   const counterPatchStatusCounts = Object.fromEntries(
-    context.db
-      .prepare<unknown[], { counter_patch_status: CounterPatchStatus; count: number }>(
-        'SELECT counter_patch_status, COUNT(*) as count FROM reviews GROUP BY counter_patch_status ORDER BY counter_patch_status ASC',
-      )
-      .all()
-      .map((row) => [row.counter_patch_status, row.count]),
+    stmts.counterPatchStatusCounts.all().map((row) => [row.counter_patch_status, row.count]),
   ) as Partial<Record<CounterPatchStatus, number>>;
 
   const reviewers = context.reviewers.list();
-  const reviewerStatusCounts = reviewers.reduce<Partial<Record<ReviewerStatus, number>>>(
-    (counts, reviewer) => ({
-      ...counts,
-      [reviewer.status]: (counts[reviewer.status] ?? 0) + 1,
-    }),
-    {},
-  );
+  const reviewerStatusCounts: Partial<Record<ReviewerStatus, number>> = {};
+  for (const reviewer of reviewers) {
+    reviewerStatusCounts[reviewer.status] = (reviewerStatusCounts[reviewer.status] ?? 0) + 1;
+  }
   const trackedReviewerCount = context.reviewerManager.inspect().trackedReviewerIds.length;
   const latestReviewer = reviewers[0] ?? null;
 
-  const latestReview =
-    context.db
-      .prepare<
-        unknown[],
-        {
-          review_id: string;
-          status: ReviewStatus;
-          current_round: number;
-          latest_verdict: ReviewVerdict | null;
-          verdict_reason: string | null;
-          counter_patch_status: CounterPatchStatus;
-          last_message_at: string | null;
-          last_activity_at: string | null;
-        }
-      >(`
-        SELECT
-          review_id,
-          status,
-          current_round,
-          latest_verdict,
-          verdict_reason,
-          counter_patch_status,
-          last_message_at,
-          last_activity_at
-        FROM reviews
-        ORDER BY updated_at DESC, review_id DESC
-        LIMIT 1
-      `)
-      .get() ?? null;
-
-  const latestMessage =
-    context.db
-      .prepare<
-        unknown[],
-        {
-          review_id: string;
-          author_id: string;
-          author_role: ReviewMessageAuthorRole;
-          created_at: string;
-        }
-      >(`
-        SELECT
-          review_id,
-          author_id,
-          author_role,
-          created_at
-        FROM messages
-        ORDER BY created_at DESC, message_id DESC
-        LIMIT 1
-      `)
-      .get() ?? null;
-
-  const latestAuditEventRow =
-    context.db
-      .prepare<
-        unknown[],
-        {
-          review_id: string | null;
-          event_type: AuditEventType;
-          error_code: string | null;
-          metadata_json: string;
-          created_at: string;
-        }
-      >(`
-        SELECT
-          review_id,
-          event_type,
-          error_code,
-          metadata_json,
-          created_at
-        FROM audit_events
-        ORDER BY created_at DESC, audit_event_id DESC
-        LIMIT 1
-      `)
-      .get() ?? null;
+  const latestReview = stmts.latestReview.get() ?? null;
+  const latestMessage = stmts.latestMessage.get() ?? null;
+  const latestAuditEventRow = stmts.latestAuditEvent.get() ?? null;
 
   const latestAuditMetadata = latestAuditEventRow ? parseMetadata(latestAuditEventRow.metadata_json) : null;
 
   return {
-    reviewCount: readCount('reviews'),
+    reviewCount: stmts.countReviews.get()?.count ?? 0,
     reviewerCount: reviewers.length,
     trackedReviewerCount,
     reviewerStatusCounts,
-    messageCount: readCount('messages'),
-    auditEventCount: readCount('audit_events'),
-    migrationCount: readCount('schema_migrations'),
+    messageCount: stmts.countMessages.get()?.count ?? 0,
+    auditEventCount: stmts.countAuditEvents.get()?.count ?? 0,
+    migrationCount: stmts.countMigrations.get()?.count ?? 0,
     statusCounts,
     counterPatchStatusCounts,
     latestReview: latestReview
