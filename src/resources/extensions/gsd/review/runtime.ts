@@ -64,7 +64,7 @@ export function stateFromStatusRecord(args: {
   const decision =
     record.status === 'approved'
       ? 'allow'
-      : record.status === 'blocked'
+      : record.status === 'changes_requested'
         ? 'block'
         : record.status === 'failed'
           ? 'error'
@@ -126,7 +126,7 @@ export async function readReviewStatus(args: ReadReviewStatusArgs): Promise<Read
     throw new Error('review_state_missing');
   }
 
-  if (!state.reviewId || !args.transport || (state.status !== 'pending' && state.status !== 'waiting')) {
+  if (!state.reviewId || !args.transport || (state.status !== 'pending' && state.status !== 'claimed')) {
     return {
       state: createReviewGateState({ ...state, source }),
       source,

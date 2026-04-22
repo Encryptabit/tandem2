@@ -20,7 +20,7 @@ test('retry prompt framing stays truthful for verification failures vs broker re
       summary: 'Needs changes.',
       feedback: 'Please add reviewer context.',
       reviewId: 'rev-block',
-      status: 'blocked',
+      status: 'changes_requested',
     }),
   );
 
@@ -83,7 +83,7 @@ test('blocked auto-loop retries the same unit without pausing or post-verificati
       async submitReview() {
         return {
           reviewId: 'rev-block',
-          status: 'blocked',
+          status: 'changes_requested',
           summary: 'Needs changes.',
           feedback: 'Please add reviewer context.',
         };
@@ -126,7 +126,7 @@ test('blocked intervene pauses visibly without retry injection or post-verificat
     mode: 'human',
     transport: {
       async submitReview() {
-        return { reviewId: 'rev-block-human', status: 'blocked', summary: 'Human intervention needed.' };
+        return { reviewId: 'rev-block-human', status: 'changes_requested', summary: 'Human intervention needed.' };
       },
       async getStatus() {
         throw new Error('not used');
@@ -163,7 +163,7 @@ test('waiting pauses visibly without retry injection or post-verification fallth
     unit,
     transport: {
       async submitReview() {
-        return { reviewId: 'rev-wait', status: 'waiting', summary: 'Still waiting.' };
+        return { reviewId: 'rev-wait', status: 'claimed', summary: 'Still waiting.' };
       },
       async getStatus() {
         throw new Error('not used');

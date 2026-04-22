@@ -25,7 +25,7 @@ function shouldRefreshExistingReview(session: AutoSession, unit: ReviewUnitIdent
     state &&
       state.reviewId &&
       sameReviewUnit(state.unit, unit) &&
-      (state.status === 'pending' || state.status === 'waiting' || state.status === 'blocked'),
+      (state.status === 'pending' || state.status === 'claimed' || state.status === 'changes_requested'),
   );
 }
 
@@ -41,7 +41,7 @@ function resultFromRecord(record: ReviewStatusRecord, blockedPolicy: 'auto-loop'
     };
   }
 
-  if (record.status === 'blocked') {
+  if (record.status === 'changes_requested') {
     return {
       kind: 'block',
       decision: 'block',
@@ -49,7 +49,7 @@ function resultFromRecord(record: ReviewStatusRecord, blockedPolicy: 'auto-loop'
       summary: record.summary ?? 'Review blocked.',
       feedback: record.feedback,
       reviewId: record.reviewId,
-      status: 'blocked',
+      status: 'changes_requested',
     };
   }
 

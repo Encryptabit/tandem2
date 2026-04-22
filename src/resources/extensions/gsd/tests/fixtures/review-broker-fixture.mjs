@@ -142,7 +142,7 @@ async function getOpenReviewForUnit(unitId) {
            error_retryable, updated_at, status_calls, sequence_json
     from reviews
     where unit_id = ${sqlString(unitId)}
-      and status in ('pending', 'waiting', 'blocked')
+      and status in ('pending', 'claimed', 'changes_requested')
     order by updated_at desc, review_id desc
     limit 1;
   `);

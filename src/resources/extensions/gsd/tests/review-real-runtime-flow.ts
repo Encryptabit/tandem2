@@ -216,7 +216,7 @@ export async function runReviewRealRuntimeProof(rootDir: string): Promise<Review
       },
       statusSequence: [
         {
-          status: 'waiting',
+          status: 'claimed',
           summary: 'Reviewer still evaluating.',
         },
       ],
@@ -249,7 +249,7 @@ export async function runReviewRealRuntimeProof(rootDir: string): Promise<Review
     assert.equal(waitFinalize.reason, 'review-waiting');
     assert.equal(waitFinalize.gate.kind, 'wait');
     assert.equal(waitFinalize.gate.reviewId, waitSubmit.reviewId);
-    assert.equal(waitFinalize.gate.status, 'waiting');
+    assert.equal(waitFinalize.gate.status, 'claimed');
     assert.equal(waitSession.paused, true);
     assert.equal(waitSession.pausedReason, 'review-waiting');
     assert.match(waitSession.history.at(-1) ?? '', /^review-waiting:/);
@@ -257,7 +257,7 @@ export async function runReviewRealRuntimeProof(rootDir: string): Promise<Review
     const waitPausedEnvelope = await readPausedEnvelope(waitRoot);
     assert.equal(waitPausedEnvelope.reason, 'review-waiting');
     assert.equal(waitPausedEnvelope.pausedReviewState.reviewGateState?.reviewId, waitSubmit.reviewId);
-    assert.equal(waitPausedEnvelope.pausedReviewState.reviewGateState?.status, 'waiting');
+    assert.equal(waitPausedEnvelope.pausedReviewState.reviewGateState?.status, 'claimed');
     assert.equal(waitPausedEnvelope.pausedReviewState.reviewGateState?.decision, 'wait');
 
     setAutoSession(null);
@@ -269,7 +269,7 @@ export async function runReviewRealRuntimeProof(rootDir: string): Promise<Review
     assert.equal(waitPausedStatus.source, 'paused');
     assert.equal(waitPausedStatus.refreshed, 'no');
     assert.equal(waitPausedStatus.reviewId, waitSubmit.reviewId);
-    assert.equal(waitPausedStatus.status, 'waiting');
+    assert.equal(waitPausedStatus.status, 'claimed');
     assert.equal(waitPausedStatus.decision, 'wait');
 
     const restartedWaitSession = await startAuto(waitRoot);
@@ -285,7 +285,7 @@ export async function runReviewRealRuntimeProof(rootDir: string): Promise<Review
     assert.equal(waitRestartedStatus.source, 'live');
     assert.equal(waitRestartedStatus.refreshed, 'yes');
     assert.equal(waitRestartedStatus.reviewId, waitSubmit.reviewId);
-    assert.equal(waitRestartedStatus.status, 'waiting');
+    assert.equal(waitRestartedStatus.status, 'claimed');
     assert.equal(waitRestartedStatus.decision, 'wait');
 
     const waitResubmit = await writeOutputArtifact(
@@ -299,12 +299,12 @@ export async function runReviewRealRuntimeProof(rootDir: string): Promise<Review
     assert.equal(waitResubmit.targetSource, 'current');
     assert.equal(waitResubmit.target, waitUnit.unitId);
     assert.equal(waitResubmit.reviewId, waitSubmit.reviewId);
-    assert.equal(waitResubmit.status, 'waiting');
+    assert.equal(waitResubmit.status, 'claimed');
     assert.equal(waitResubmit.decision, 'wait');
 
     await broker.setUnitScenario(blockedUnit.unitId, {
       submit: {
-        status: 'blocked',
+        status: 'changes_requested',
         summary: 'Reviewer blocked progression.',
         feedback: 'Needs manual follow-up.',
       },
@@ -329,7 +329,7 @@ export async function runReviewRealRuntimeProof(rootDir: string): Promise<Review
     const blockedPausedEnvelope = await readPausedEnvelope(blockedRoot);
     assert.equal(blockedPausedEnvelope.reason, 'review-blocked');
     assert.equal(blockedPausedEnvelope.pausedReviewState.reviewGateState?.reviewId, blockedFinalize.gate.reviewId);
-    assert.equal(blockedPausedEnvelope.pausedReviewState.reviewGateState?.status, 'blocked');
+    assert.equal(blockedPausedEnvelope.pausedReviewState.reviewGateState?.status, 'changes_requested');
     assert.equal(blockedPausedEnvelope.pausedReviewState.reviewGateState?.decision, 'block');
     assert.equal(blockedPausedEnvelope.pausedReviewState.reviewGateState?.blockedPolicy, 'intervene');
 
@@ -342,7 +342,7 @@ export async function runReviewRealRuntimeProof(rootDir: string): Promise<Review
     assert.equal(blockedPausedStatus.source, 'paused');
     assert.equal(blockedPausedStatus.refreshed, 'no');
     assert.equal(blockedPausedStatus.reviewId, blockedFinalize.gate.reviewId ?? '');
-    assert.equal(blockedPausedStatus.status, 'blocked');
+    assert.equal(blockedPausedStatus.status, 'changes_requested');
     assert.equal(blockedPausedStatus.decision, 'block');
     assert.equal(blockedPausedStatus.blockedPolicy, 'intervene');
 
@@ -358,7 +358,7 @@ export async function runReviewRealRuntimeProof(rootDir: string): Promise<Review
     assert.equal(blockedResubmit.targetSource, 'current');
     assert.equal(blockedResubmit.target, blockedUnit.unitId);
     assert.equal(blockedResubmit.reviewId, blockedFinalize.gate.reviewId ?? '');
-    assert.equal(blockedResubmit.status, 'blocked');
+    assert.equal(blockedResubmit.status, 'changes_requested');
     assert.equal(blockedResubmit.decision, 'block');
 
     await broker.setUnitScenario(errorUnit.unitId, {
@@ -437,13 +437,13 @@ export async function runReviewRealRuntimeProof(rootDir: string): Promise<Review
 
     assert.equal(waitRows.length, 1);
     assert.equal(waitRows[0]?.reviewId, waitSubmit.reviewId);
-    assert.equal(waitRows[0]?.status, 'waiting');
+    assert.equal(waitRows[0]?.status, 'claimed');
     assert.equal(waitRows[0]?.summary, 'Reviewer still evaluating.');
     assert.equal(waitRows[0]?.statusCalls, 1);
 
     assert.equal(blockedRows.length, 1);
     assert.equal(blockedRows[0]?.reviewId, blockedFinalize.gate.reviewId);
-    assert.equal(blockedRows[0]?.status, 'blocked');
+    assert.equal(blockedRows[0]?.status, 'changes_requested');
     assert.equal(blockedRows[0]?.summary, 'Reviewer blocked progression.');
     assert.equal(blockedRows[0]?.feedback, 'Needs manual follow-up.');
     assert.equal(blockedRows[0]?.statusCalls, 0);
