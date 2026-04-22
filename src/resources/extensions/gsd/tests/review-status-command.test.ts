@@ -90,7 +90,7 @@ test('falls back to paused review state when no live state exists and refreshes 
         assert.equal(reviewId, 'rev-paused');
         return {
           reviewId,
-          status: 'waiting',
+          status: 'claimed',
           summary: 'Still pending from broker.',
         };
       },
@@ -100,7 +100,7 @@ test('falls back to paused review state when no live state exists and refreshes 
   assert.match(output, /source: paused/);
   assert.match(output, /refreshed: yes/);
   assert.match(output, /reviewId: rev-paused/);
-  assert.match(output, /status: waiting/);
+  assert.match(output, /status: claimed/);
   assert.match(output, /decision: wait/);
   assert.match(output, /summary: Still pending from broker\./);
 });

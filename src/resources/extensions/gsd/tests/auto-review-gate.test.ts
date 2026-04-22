@@ -35,7 +35,7 @@ test('reuses same-unit review id before submitting again', async () => {
         assert.equal(reviewId, 'rev-123');
         return {
           reviewId,
-          status: 'blocked',
+          status: 'changes_requested',
           summary: 'Needs changes.',
           feedback: 'Please add reviewer context.',
         };
@@ -81,7 +81,7 @@ test('blocked-policy resolution stays mode-aware', async () => {
     async submitReview() {
       return {
         reviewId: 'rev-blocked',
-        status: 'blocked' as const,
+        status: 'changes_requested' as const,
         summary: 'Blocked.',
       };
     },

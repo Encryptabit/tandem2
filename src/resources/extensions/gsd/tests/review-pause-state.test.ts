@@ -43,7 +43,7 @@ test('paused review deserialization tolerates missing payloads and restores norm
       phase: 'completed',
       unit: { unitId: 'M002-S03-T04' },
       reviewId: 'rev-2',
-      status: 'blocked',
+      status: 'changes_requested',
       decision: 'block',
       blockedPolicy: 'intervene',
       summary: 'Blocked.',

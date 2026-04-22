@@ -1,6 +1,6 @@
 export type ReviewMode = 'auto' | 'human';
 export type ReviewPhase = 'idle' | 'submitting' | 'waiting' | 'completed' | 'error';
-export type ReviewStatus = 'pending' | 'waiting' | 'approved' | 'blocked' | 'failed';
+export type ReviewStatus = 'pending' | 'claimed' | 'approved' | 'changes_requested' | 'failed';
 export type ReviewDecision = 'allow' | 'block' | 'wait' | 'error' | 'skipped';
 export type BlockedReviewPolicy = 'mode-default' | 'auto-loop' | 'intervene';
 export type ResolvedBlockedReviewPolicy = 'auto-loop' | 'intervene';
@@ -75,7 +75,7 @@ export type ReviewGateResult =
       summary: string;
       feedback?: string;
       reviewId: string;
-      status: 'blocked';
+      status: 'changes_requested';
     }
   | {
       kind: 'wait';
@@ -83,7 +83,7 @@ export type ReviewGateResult =
       blockedPolicy: ResolvedBlockedReviewPolicy;
       summary: string;
       reviewId: string;
-      status: 'pending' | 'waiting';
+      status: 'pending' | 'claimed';
     }
   | {
       kind: 'error';
