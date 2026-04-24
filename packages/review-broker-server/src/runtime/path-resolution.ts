@@ -3,18 +3,23 @@ import path from 'node:path';
 
 export const REVIEW_BROKER_DB_PATH_ENV = 'REVIEW_BROKER_DB_PATH';
 export const REVIEW_BROKER_CONFIG_PATH_ENV = 'REVIEW_BROKER_CONFIG_PATH';
+export const TANDEM_BROKER_DB_ENV = 'TANDEM_BROKER_DB';
+
+const LOCAL_TANDEM_EXTENSION_PATH = path.join('.gsd', 'extensions', 'tandem-review.mjs');
+const LOCAL_TANDEM_BROKER_DB_PATH = path.join('.gsd', 'review-broker', 'broker.db');
 
 export interface ResolveBrokerPathsOptions {
   cwd?: string;
   dbPath?: string;
   env?: NodeJS.ProcessEnv;
   homeDir?: string;
+  preferLocalExtensionDb?: boolean;
 }
 
 export interface ResolvedBrokerPaths {
   workspaceRoot: string;
   dbPath: string;
-  dbPathSource: 'argument' | 'env' | 'default';
+  dbPathSource: 'argument' | 'env' | 'local-extension' | 'default';
   configPath: string;
   configPathSource: 'env' | 'default';
 }
@@ -27,6 +32,14 @@ export function resolveBrokerPaths(options: ResolveBrokerPathsOptions = {}): Res
 
   let dbPathSource: ResolvedBrokerPaths['dbPathSource'] = 'default';
   let dbPath = defaultBrokerDbPath({ env, homeDir });
+
+  if (options.preferLocalExtensionDb) {
+    const localExtensionDbPath = resolveLocalTandemExtensionDbPath({ cwd, env, workspaceRoot });
+    if (localExtensionDbPath) {
+      dbPath = localExtensionDbPath;
+      dbPathSource = 'local-extension';
+    }
+  }
 
   if (env[REVIEW_BROKER_DB_PATH_ENV]) {
     dbPath = path.resolve(cwd, env[REVIEW_BROKER_DB_PATH_ENV]!);
@@ -71,6 +84,25 @@ export function findWorkspaceRoot(startDir: string): string {
 
     current = parent;
   }
+}
+
+export function resolveLocalTandemExtensionDbPath(options: {
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+  workspaceRoot: string;
+}): string | null {
+  const extensionPath = path.join(options.workspaceRoot, LOCAL_TANDEM_EXTENSION_PATH);
+  if (!existsSync(extensionPath)) {
+    return null;
+  }
+
+  const extensionDbPath = options.env[TANDEM_BROKER_DB_ENV]?.trim();
+  if (extensionDbPath) {
+    return path.resolve(options.cwd, extensionDbPath);
+  }
+
+  const defaultLocalDbPath = path.join(options.workspaceRoot, LOCAL_TANDEM_BROKER_DB_PATH);
+  return existsSync(defaultLocalDbPath) ? defaultLocalDbPath : null;
 }
 
 function hasWorkspaceMarker(candidate: string): boolean {

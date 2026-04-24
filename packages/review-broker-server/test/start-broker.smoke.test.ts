@@ -39,7 +39,13 @@ describe('review-broker-server standalone start command', () => {
           event: 'broker.started',
           mode: 'once',
           dbPath: path.resolve(dbPath),
-          migrations: ['001_init', '002_review_lifecycle_parity', '003_reviewer_lifecycle', '004_pool_management'],
+          migrations: [
+            '001_init',
+            '002_review_lifecycle_parity',
+            '003_reviewer_lifecycle',
+            '004_pool_management',
+            '005_review_project_identity',
+          ],
           startupRecovery: expect.objectContaining({
             recoveredReviewerIds: [],
             reclaimedReviewIds: [],
@@ -57,7 +63,7 @@ describe('review-broker-server standalone start command', () => {
           reviewerStatusCounts: {},
           messageCount: 0,
           auditEventCount: 0,
-          migrationCount: 4,
+          migrationCount: 5,
           statusCounts: {},
           counterPatchStatusCounts: {},
           latestReview: null,
@@ -87,7 +93,13 @@ describe('review-broker-server standalone start command', () => {
           event: 'broker.started',
           mode: 'once',
           dbPath: path.resolve(dbPath),
-          migrations: ['001_init', '002_review_lifecycle_parity', '003_reviewer_lifecycle', '004_pool_management'],
+          migrations: [
+            '001_init',
+            '002_review_lifecycle_parity',
+            '003_reviewer_lifecycle',
+            '004_pool_management',
+            '005_review_project_identity',
+          ],
           startupRecovery: expect.objectContaining({
             recoveredReviewerIds: ['smoke-reviewer-1'],
             reclaimedReviewIds: [seededReviewId],
@@ -114,7 +126,7 @@ describe('review-broker-server standalone start command', () => {
           },
           messageCount: 0,
           auditEventCount: 5,
-          migrationCount: 4,
+          migrationCount: 5,
           statusCounts: {
             pending: 1,
           },
@@ -213,7 +225,7 @@ describe('review-broker-server standalone start command', () => {
         )
         .all();
 
-      expect(migrationCount?.count).toBe(4);
+      expect(migrationCount?.count).toBe(5);
       expect(reviewRow).toMatchObject({
         status: 'pending',
         claimed_by: null,

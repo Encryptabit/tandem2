@@ -29,6 +29,7 @@ interface ReviewerManagerDependencies {
   reviewers: ReviewersRepository;
   audit: AuditRepository;
   workspaceRoot: string;
+  dbPath?: string;
   notifications?: { notify: (topic: string) => number };
 }
 
@@ -131,6 +132,7 @@ export function createReviewerManager(options: CreateReviewerManagerOptions): Re
           ...process.env,
           REVIEW_BROKER_REVIEWER_ID: reviewerId,
           REVIEW_BROKER_WORKSPACE_ROOT: options.workspaceRoot,
+          ...(options.dbPath ? { REVIEW_BROKER_DB_PATH: options.dbPath } : {}),
         },
       });
     } catch (error) {

@@ -30,7 +30,7 @@ describe('reviewer worker script', () => {
         TANDEM_LOG_PATH: harness.tandemLogPath,
         TANDEM_STATE_PATH: harness.statePath,
         REVIEW_BROKER_REVIEWER_ID: 'reviewer-loop-1',
-        REVIEWER_MODEL: 'test-model',
+        REVIEWER_MODEL: '',
         REVIEWER_POLL_INTERVAL_MS: '25',
       },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -58,7 +58,8 @@ describe('reviewer worker script', () => {
 
     const gsdEntries = readLogEntries(harness.gsdLogPath);
     expect(gsdEntries.length).toBeGreaterThanOrEqual(1);
-    expect(gsdEntries[0]?.args.slice(0, 4)).toEqual(['--print', '--no-session', '--model', 'test-model']);
+    expect(gsdEntries[0]?.args.slice(0, 2)).toEqual(['--print', '--no-session']);
+    expect(gsdEntries[0]?.args).not.toContain('--model');
     expect(gsdEntries[0]?.args.at(-1)).toContain('rvw_queue_1');
     expect(gsdEntries[0]?.args.at(-1)).toContain('diff --git');
   });
@@ -91,7 +92,7 @@ describe('reviewer worker script', () => {
 
     const gsdEntries = readLogEntries(harness.gsdLogPath);
     expect(gsdEntries).toHaveLength(1);
-    expect(gsdEntries[0]?.args[3]).toBe('single-model');
+    expect(gsdEntries[0]?.args.slice(0, 4)).toEqual(['--print', '--no-session', '--model', 'single-model']);
     expect(gsdEntries[0]?.args.at(-1)).toContain('rvw_single_1');
   });
 });

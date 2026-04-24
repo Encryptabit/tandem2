@@ -109,6 +109,8 @@ export interface ReviewLifecycleSnapshot {
 export interface ReviewSummary extends ReviewLifecycleSnapshot {
   reviewId: string;
   title: string;
+  workspaceRoot: string | null;
+  projectName: string | null;
   status: ReviewStatus;
   priority: ReviewPriority;
   authorId: string;
@@ -122,6 +124,8 @@ export interface ReviewSummary extends ReviewLifecycleSnapshot {
 export interface ReviewProposal extends ReviewLifecycleSnapshot {
   reviewId: string;
   title: string;
+  workspaceRoot: string | null;
+  projectName: string | null;
   description: string;
   diff: string;
   affectedFiles: string[];

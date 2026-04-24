@@ -60,6 +60,13 @@ export const ReviewLifecycleSnapshotSchema = z
   })
   .strict();
 
+export const ReviewProjectIdentitySchema = z
+  .object({
+    workspaceRoot: z.string().trim().min(1).nullable(),
+    projectName: z.string().trim().min(1).nullable(),
+  })
+  .strict();
+
 export const ReviewSummarySchema = z
   .object({
     reviewId: ReviewIdSchema,
@@ -73,6 +80,7 @@ export const ReviewSummarySchema = z
     claimedAt: IsoDateTimeSchema.nullable(),
     claimGeneration: ClaimGenerationSchema,
   })
+  .merge(ReviewProjectIdentitySchema)
   .merge(ReviewLifecycleSnapshotSchema)
   .strict();
 
@@ -85,6 +93,7 @@ export const ReviewProposalSchema = z
     affectedFiles: AffectedFilesSchema,
     priority: ReviewPrioritySchema,
   })
+  .merge(ReviewProjectIdentitySchema)
   .merge(ReviewLifecycleSnapshotSchema)
   .strict();
 
@@ -309,6 +318,14 @@ export const AddMessageRequestSchema = z
     reviewId: ReviewIdSchema,
     actorId: ActorIdSchema,
     body: MessageBodySchema,
+    /**
+     * Optional replacement proposal diff for proposer counter-patches.
+     *
+     * When provided by the proposer while requeueing a changes_requested review,
+     * broker-service validates and persists this as the canonical review proposal
+     * so reviewers do not keep evaluating stale diffs from the original round.
+     */
+    diff: z.string().min(1).optional(),
   })
   .strict();
 

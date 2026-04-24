@@ -22,7 +22,8 @@
     "paths": {
       "review-broker-core": ["./packages/review-broker-core/src/index.ts"],
       "tandem2": ["./packages/review-broker-server/src/index.ts"],
-      "review-broker-client": ["./packages/review-broker-client/src/index.ts"]
+      "review-broker-client": ["./packages/review-broker-client/src/index.ts"],
+      "review-broker-extension": ["./packages/review-broker-extension/src/index.ts"]
     }
   }
 }

@@ -26,7 +26,7 @@ export interface CreateAppContextOptions extends ResolveBrokerPathsOptions {
 export interface AppContext {
   db: Database.Database;
   dbPath: string;
-  dbPathSource: 'argument' | 'env' | 'default';
+  dbPathSource: 'argument' | 'env' | 'local-extension' | 'default';
   configPath: string;
   configPathSource: 'env' | 'default';
   workspaceRoot: string;
@@ -57,6 +57,7 @@ export function createAppContext(options: CreateAppContextOptions = {}): AppCont
     reviewers,
     audit,
     workspaceRoot: resolved.workspaceRoot,
+    dbPath: opened.dbPath,
     notifications,
   });
   const poolConfig = loadPoolConfig(resolved.configPath);

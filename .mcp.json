@@ -11,6 +11,20 @@
         "tsx",
         "src/cli/start-mcp.ts"
       ]
+    },
+    "gsd-workflow": {
+      "command": "/home/cari/.nvm/versions/node/v22.19.0/bin/node",
+      "args": [
+        "/home/cari/repos/gsd-2/packages/mcp-server/dist/cli.js"
+      ],
+      "cwd": "/home/cari/repos/tandem2",
+      "env": {
+        "GSD_CLI_PATH": "/home/cari/.nvm/versions/node/v22.19.0/bin/gsd",
+        "GSD_WORKFLOW_EXECUTORS_MODULE": "/home/cari/.gsd/agent/extensions/gsd/tools/workflow-tool-executors.js",
+        "GSD_WORKFLOW_WRITE_GATE_MODULE": "/home/cari/.gsd/agent/extensions/gsd/bootstrap/write-gate.js",
+        "GSD_PERSIST_WRITE_GATE_STATE": "1",
+        "GSD_WORKFLOW_PROJECT_ROOT": "/home/cari/repos/tandem2"
+      }
     }
   }
 }

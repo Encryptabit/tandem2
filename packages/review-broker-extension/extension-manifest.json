@@ -1,0 +1,14 @@
+{
+  "id": "tandem-review",
+  "name": "Tandem Review Gate",
+  "version": "0.1.0",
+  "description": "Review gate for gsd-2 auto-mode using the Tandem review broker",
+  "tier": "ecosystem",
+  "requires": {
+    "platform": ">=2.29.0"
+  },
+  "provides": {
+    "hooks": ["before_next_dispatch"],
+    "commands": ["review"]
+  }
+}

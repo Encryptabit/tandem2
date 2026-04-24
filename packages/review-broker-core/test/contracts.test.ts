@@ -85,6 +85,8 @@ describe('review-broker-core contracts', () => {
     const review = ReviewSummarySchema.parse({
       reviewId: 'rvw_123',
       title: 'Broker parity review',
+      workspaceRoot: '/work/broker-parity',
+      projectName: 'broker-parity',
       status: 'changes_requested',
       priority: 'high',
       authorId: 'agent-cari',
@@ -104,6 +106,8 @@ describe('review-broker-core contracts', () => {
     const proposal = ReviewProposalSchema.parse({
       reviewId: 'rvw_123',
       title: 'Broker parity review',
+      workspaceRoot: '/work/broker-parity',
+      projectName: 'broker-parity',
       description: 'Port the shared review contract first.',
       diff: 'diff --git a/file.ts b/file.ts',
       affectedFiles: ['packages/review-broker-core/src/contracts.ts'],
@@ -117,6 +121,7 @@ describe('review-broker-core contracts', () => {
     });
 
     expect(review.currentRound).toBe(2);
+    expect(review.projectName).toBe('broker-parity');
     expect(review.verdictReason).toBe('Please add persistence coverage.');
     expect(proposal.counterPatchStatus).toBe('pending');
   });
@@ -223,6 +228,8 @@ describe('review-broker-core contracts', () => {
         {
           reviewId: 'rvw_123',
           title: 'Broker parity review',
+          workspaceRoot: '/work/broker-parity',
+          projectName: 'broker-parity',
           status: 'pending',
           priority: 'normal',
           authorId: 'agent-cari',
@@ -251,6 +258,8 @@ describe('review-broker-core contracts', () => {
     const review = {
       reviewId: 'rvw_123',
       title: 'Broker parity review',
+      workspaceRoot: '/work/broker-parity',
+      projectName: 'broker-parity',
       status: 'approved',
       priority: 'normal',
       authorId: 'agent-cari',
@@ -270,6 +279,8 @@ describe('review-broker-core contracts', () => {
     const proposal = {
       reviewId: 'rvw_123',
       title: 'Broker parity review',
+      workspaceRoot: '/work/broker-parity',
+      projectName: 'broker-parity',
       description: 'Port the shared review contract first.',
       diff: 'diff --git a/file.ts b/file.ts',
       affectedFiles: ['packages/review-broker-core/src/contracts.ts'],
@@ -452,6 +463,8 @@ describe('review-broker-core contracts', () => {
         review: {
           reviewId: 'rvw_123',
           title: 'Registry-backed status',
+          workspaceRoot: '/work/registry-backed',
+          projectName: 'registry-backed',
           status: 'pending',
           priority: 'normal',
           authorId: 'agent-cari',

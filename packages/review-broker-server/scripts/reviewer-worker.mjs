@@ -13,12 +13,13 @@ import process from 'node:process';
 import { spawn } from 'node:child_process';
 
 const reviewerId = process.env.REVIEW_BROKER_REVIEWER_ID || 'reviewer-pool-agent';
-const model = process.env.REVIEWER_MODEL || 'gpt-5.3-codex';
+const modelOverride = process.env.REVIEWER_MODEL?.trim() || null;
 const pollIntervalMs = parsePositiveInteger(process.env.REVIEWER_POLL_INTERVAL_MS, 3_000);
 const reviewId = process.argv[2] && !process.argv[2].startsWith('--') ? process.argv[2] : null;
-const gsdCommand = process.env.REVIEWER_GSD_COMMAND || 'gsd';
 const tandemCommand = process.env.REVIEWER_TANDEM_COMMAND || 'tandem';
 const brokerDbPath = process.env.REVIEW_BROKER_DB_PATH || null;
+const modelFailureVerdict = parseFallbackVerdict(process.env.REVIEWER_FALLBACK_VERDICT);
+const gsdInvocation = resolveGsdInvocation();
 
 let shuttingDown = false;
 let activeChild = null;
@@ -44,6 +45,36 @@ function parsePositiveInteger(rawValue, fallback) {
 
   const parsed = Number.parseInt(rawValue, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function parseFallbackVerdict(rawValue) {
+  if (rawValue === 'changes_requested') {
+    return 'changes_requested';
+  }
+  return 'approved';
+}
+
+function resolveGsdInvocation() {
+  const explicitCommand = process.env.REVIEWER_GSD_COMMAND;
+  if (typeof explicitCommand === 'string' && explicitCommand.trim().length > 0) {
+    return {
+      command: explicitCommand.trim(),
+      args: [],
+    };
+  }
+
+  const gsdBinPath = process.env.GSD_BIN_PATH;
+  if (typeof gsdBinPath === 'string' && gsdBinPath.trim().length > 0) {
+    return {
+      command: process.execPath,
+      args: [gsdBinPath],
+    };
+  }
+
+  return {
+    command: 'gsd',
+    args: [],
+  };
 }
 
 function delay(ms) {
@@ -255,10 +286,18 @@ function parseDecision(raw) {
 
 async function runModelDecision(proposal) {
   const prompt = buildAnalysisPrompt(proposal);
-  const result = await runCommand(gsdCommand, ['--print', '--no-session', '--model', model, prompt], {
+  const gsdArgs = [
+    ...gsdInvocation.args,
+    '--print',
+    '--no-session',
+    ...(modelOverride ? ['--model', modelOverride] : []),
+    prompt,
+  ];
+
+  const result = await runCommand(gsdInvocation.command, gsdArgs, {
     captureStdout: true,
-    captureStderr: false,
-    inheritStderr: true,
+    captureStderr: true,
+    inheritStderr: false,
   });
 
   if (result.signal === 'SIGTERM' && shuttingDown) {
@@ -266,7 +305,12 @@ async function runModelDecision(proposal) {
   }
 
   if (result.exitCode !== 0) {
-    throw new Error(`[reviewer-worker] gsd exited with code ${result.exitCode}`);
+    const stderr = result.stderr.trim();
+    const detail = stderr.length > 0 ? `: ${stderr}` : '';
+    throw new Error(
+      `[reviewer-worker] gsd invocation failed (${gsdInvocation.command} ${gsdArgs.slice(0, 5).join(' ')} ...) ` +
+        `exit=${result.exitCode}${detail}`,
+    );
   }
 
   return parseDecision(result.stdout);
@@ -307,8 +351,8 @@ async function reviewClaimedReview(targetReviewId) {
   } catch (error) {
     const fallbackReason = error instanceof Error ? error.message : String(error);
     decision = {
-      verdict: 'changes_requested',
-      reason: `Automated reviewer failed: ${fallbackReason}`,
+      verdict: modelFailureVerdict,
+      reason: `Automated reviewer fallback (${modelFailureVerdict}): ${fallbackReason}`,
     };
   }
 
@@ -334,7 +378,9 @@ async function claimSpecificReview(targetReviewId) {
 
 async function main() {
   console.error(
-    `[reviewer-worker] starting reviewerId=${reviewerId} mode=${reviewId ? 'single-review' : 'queue-loop'} model=${model}`,
+    `[reviewer-worker] starting reviewerId=${reviewerId} mode=${reviewId ? 'single-review' : 'queue-loop'} ` +
+      `model=${modelOverride ?? 'gsd-default'} ` +
+      `gsd=${gsdInvocation.command} fallbackVerdict=${modelFailureVerdict}`,
   );
 
   if (reviewId) {

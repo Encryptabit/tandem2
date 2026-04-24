@@ -161,6 +161,7 @@ export const DashboardReviewListItemSchema = z
   .object({
     reviewId: ReviewIdSchema,
     title: z.string().min(1),
+    projectName: z.string().trim().min(1).nullable(),
     status: ReviewStatusSchema,
     priority: ReviewPrioritySchema,
     authorId: ActorIdSchema,

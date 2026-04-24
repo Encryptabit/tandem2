@@ -297,6 +297,7 @@ function projectOperatorEvent(record: AuditEventRecord): OperatorEventEntry {
 function projectDashboardReviewListItem(review: {
   reviewId: string;
   title: string;
+  projectName: string | null;
   status: string;
   priority: string;
   authorId: string;
@@ -315,6 +316,7 @@ function projectDashboardReviewListItem(review: {
   return {
     reviewId: review.reviewId,
     title: review.title,
+    projectName: review.projectName,
     status: review.status as DashboardReviewListItem['status'],
     priority: review.priority as DashboardReviewListItem['priority'],
     authorId: review.authorId,

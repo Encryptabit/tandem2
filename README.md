@@ -86,9 +86,9 @@ The broker emits structured JSON events on stdout:
 
 ## Dashboard
 
-The operator dashboard is a thin Astro-built client served directly from the broker process. It has three pages, each backed by broker-owned JSON API routes. All data comes from the broker's SQLite database — the dashboard never maintains its own state.
+The operator dashboard is a thin Astro-built client served directly from the broker process. It has three pages, each backed by broker-owned JSON API routes. All data comes from the broker's SQLite database — the dashboard never maintains its own state. By default, `tandem dashboard` opens a detected project-local Tandem extension database; if none is present, it opens the global Tandem broker database so one dashboard can show review activity from multiple projects.
 
-**Live updates** use SSE (Server-Sent Events) as a change notification signal. When the broker's state changes, it pushes a lightweight event (topic + version number) over SSE. The dashboard responds by re-fetching the relevant snapshot route. This means the dashboard stays correct across reconnects and page reloads — snapshot routes are always authoritative.
+**Live updates** use SSE (Server-Sent Events) as a change notification signal. When the broker's state changes in the dashboard process, it pushes a lightweight event (topic + version number) over SSE. The reviews page also periodically refreshes so changes written by other project-local broker processes sharing the same global database appear without a manual reload. Snapshot routes are always authoritative.
 
 ### Pages
 

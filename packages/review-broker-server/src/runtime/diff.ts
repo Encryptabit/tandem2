@@ -78,18 +78,53 @@ function runGitApplyCheck(options: { diff: string; workspaceRoot: string; affect
 
   const tempDirectory = mkdtempSync(path.join(tempRoot, 'review-diff-'));
   const patchPath = path.join(tempDirectory, 'proposal.diff');
+  const tempIndexPath = path.join(tempDirectory, 'index');
 
   try {
     writeFileSync(patchPath, options.diff, 'utf8');
 
-    const result = spawnSync('git', ['-C', options.workspaceRoot, 'apply', '--check', patchPath], {
+    // Validate against a temporary index seeded from HEAD so the check is
+    // independent of the live worktree/index. This is required for the worktree-
+    // diff workflow (see review-broker-extension Fix 1) — applying forward
+    // against the live worktree fails when the changes are already present
+    // there. Validating against HEAD answers the right question: "does this
+    // patch apply cleanly on top of the last committed state?"
+    const childEnv = { ...process.env, GIT_INDEX_FILE: tempIndexPath };
+
+    const readTree = spawnSync('git', ['-C', options.workspaceRoot, 'read-tree', 'HEAD'], {
       encoding: 'utf8',
+      env: childEnv,
     });
+
+    if (readTree.error) {
+      throw new DiffValidationError({
+        code: 'DIFF_VALIDATION_FAILED',
+        message: `Failed to seed temporary index from HEAD in ${options.workspaceRoot}: ${readTree.error.message}`,
+        workspaceRoot: options.workspaceRoot,
+        affectedFiles: options.affectedFiles,
+      });
+    }
+
+    if (readTree.status !== 0) {
+      const details = [readTree.stderr, readTree.stdout].map((value) => value.trim()).filter(Boolean).join(' | ');
+      throw new DiffValidationError({
+        code: 'DIFF_VALIDATION_FAILED',
+        message: details || `git read-tree HEAD failed in ${options.workspaceRoot}.`,
+        workspaceRoot: options.workspaceRoot,
+        affectedFiles: options.affectedFiles,
+      });
+    }
+
+    const result = spawnSync(
+      'git',
+      ['-C', options.workspaceRoot, 'apply', '--cached', '--check', patchPath],
+      { encoding: 'utf8', env: childEnv },
+    );
 
     if (result.error) {
       throw new DiffValidationError({
         code: 'DIFF_VALIDATION_FAILED',
-        message: `Failed to execute git apply --check in ${options.workspaceRoot}: ${result.error.message}`,
+        message: `Failed to execute git apply --cached --check in ${options.workspaceRoot}: ${result.error.message}`,
         workspaceRoot: options.workspaceRoot,
         affectedFiles: options.affectedFiles,
       });
@@ -99,7 +134,7 @@ function runGitApplyCheck(options: { diff: string; workspaceRoot: string; affect
       const details = [result.stderr, result.stdout].map((value) => value.trim()).filter(Boolean).join(' | ');
       throw new DiffValidationError({
         code: 'INVALID_DIFF',
-        message: details || `git apply --check rejected the diff in ${options.workspaceRoot}.`,
+        message: details || `git apply --cached --check rejected the diff in ${options.workspaceRoot}.`,
         workspaceRoot: options.workspaceRoot,
         affectedFiles: options.affectedFiles,
       });

@@ -125,6 +125,7 @@ describe('http review routes', () => {
           expect(review.title).toBeTruthy();
           expect(review.status).toBe('pending');
           expect(review.authorId).toBe('test-author');
+          expect(review.projectName).toBe(path.basename(WORKTREE_ROOT));
         }
       } finally {
         await server.close();
@@ -240,6 +241,7 @@ describe('http review routes', () => {
         // Review status
         expect(parsed.review.reviewId).toBe(review.reviewId);
         expect(parsed.review.title).toBe('Detail test review');
+        expect(parsed.review.projectName).toBe(path.basename(WORKTREE_ROOT));
         expect(parsed.review.status).toBe('pending');
 
         // Proposal

@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -32,6 +32,21 @@ function runTandem(args: string[]): ReturnType<typeof spawnSync> {
  */
 function parseJsonOutput(stdout: string): unknown {
   return JSON.parse(stdout.trim());
+}
+
+function buildReplacementDiff(fileName: string, exportedName: string): string {
+  return [
+    `diff --git a/packages/review-broker-server/src/runtime/${fileName} b/packages/review-broker-server/src/runtime/${fileName}`,
+    'new file mode 100644',
+    'index 0000000..6c55ed8',
+    '--- /dev/null',
+    `+++ b/packages/review-broker-server/src/runtime/${fileName}`,
+    '@@ -0,0 +1,3 @@',
+    `+export const ${exportedName} = 'round2';`,
+    '+',
+    `+console.log(${exportedName});`,
+    '',
+  ].join('\n');
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -530,6 +545,8 @@ describe('tandem CLI smoke tests', () => {
       const stdout = result.stdout as string;
       expect(stdout).toContain('--port');
       expect(stdout).toContain('--host');
+      expect(stdout).toContain('local extension DB');
+      expect(stdout).toContain('otherwise global');
     });
   });
 
@@ -652,6 +669,74 @@ describe('tandem CLI smoke tests', () => {
       expect(output).toHaveProperty('version');
       const message = output.message as Record<string, unknown>;
       expect(message.body).toBe('Test message from CLI');
+    });
+
+    it('can replace the canonical proposal diff when requeueing through the CLI', async () => {
+      const directory = mkdtempSync(path.join(os.tmpdir(), 'tandem-cli-diff-requeue-'));
+      const localDbPath = path.join(directory, 'test.sqlite');
+      const diffPath = path.join(directory, 'replacement.diff');
+      const originalDiff = readFileSync(
+        path.join(WORKTREE_ROOT, 'packages', 'review-broker-server', 'test', 'fixtures', 'valid-review.diff'),
+        'utf8',
+      );
+      const replacementDiff = buildReplacementDiff('_proposal_fixture_cli_round2.ts', 'proposalFixtureCliRound2');
+      writeFileSync(diffPath, replacementDiff, 'utf8');
+
+      const context = createAppContext({
+        cwd: WORKTREE_ROOT,
+        dbPath: localDbPath,
+      });
+      const service = createBrokerService(context);
+
+      let localReviewId: string;
+      try {
+        const created = await service.createReview({
+          title: 'CLI replacement diff review',
+          description: 'Seeded for discussion add --diff-file.',
+          diff: originalDiff,
+          authorId: 'test-author',
+          priority: 'normal',
+        });
+        localReviewId = created.review.reviewId;
+
+        await service.claimReview({
+          reviewId: localReviewId,
+          claimantId: 'cli-reviewer',
+        });
+        await service.submitVerdict({
+          reviewId: localReviewId,
+          actorId: 'cli-reviewer',
+          verdict: 'changes_requested',
+          reason: 'Please resubmit with the requested update.',
+        });
+      } finally {
+        context.close();
+      }
+
+      try {
+        const result = runTandem([
+          'discussion', 'add', localReviewId, '--actor', 'test-author',
+          '--body', 'Submitted the updated canonical patch.',
+          '--diff-file', diffPath,
+          '--json', '--db-path', localDbPath,
+        ]);
+
+        expect(result.status).toBe(0);
+        const output = parseJsonOutput(result.stdout as string) as Record<string, unknown>;
+        const review = output.review as Record<string, unknown>;
+        expect(review.status).toBe('pending');
+        expect(review.counterPatchStatus).toBe('pending');
+
+        const proposalResult = runTandem(['proposal', 'show', localReviewId, '--json', '--db-path', localDbPath]);
+        expect(proposalResult.status).toBe(0);
+        const proposalOutput = parseJsonOutput(proposalResult.stdout as string) as { proposal: Record<string, unknown> };
+        expect(proposalOutput.proposal.diff).toBe(replacementDiff);
+        expect(proposalOutput.proposal.affectedFiles).toEqual([
+          'packages/review-broker-server/src/runtime/_proposal_fixture_cli_round2.ts',
+        ]);
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
     });
   });
 

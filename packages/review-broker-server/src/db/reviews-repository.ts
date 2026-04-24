@@ -13,6 +13,8 @@ import {
 interface ReviewRow {
   review_id: string;
   title: string;
+  workspace_root: string | null;
+  project_name: string | null;
   description: string;
   diff: string;
   affected_files_json: string;
@@ -46,6 +48,8 @@ export interface CounterPatchDecisionRecord {
 export interface InsertReviewInput {
   reviewId: string;
   title: string;
+  workspaceRoot?: string | null;
+  projectName?: string | null;
   description: string;
   diff: string;
   affectedFiles: string[];
@@ -92,6 +96,10 @@ export interface UpdateReviewStateInput {
   counterPatchDecidedAt?: string | null;
   lastMessageAt?: string | null;
   lastActivityAt?: string | null;
+  /** Optional canonical proposal diff replacement. */
+  diff?: string;
+  /** Optional canonical affected-files replacement. Must align with diff. */
+  affectedFiles?: string[];
 }
 
 export interface RecordVerdictInput {
@@ -137,6 +145,8 @@ export interface ReviewsRepository {
 const REVIEW_SELECT_COLUMNS = `
   review_id,
   title,
+  workspace_root,
+  project_name,
   description,
   diff,
   affected_files_json,
@@ -164,6 +174,8 @@ export function createReviewsRepository(db: Database.Database): ReviewsRepositor
     INSERT INTO reviews (
       review_id,
       title,
+      workspace_root,
+      project_name,
       description,
       diff,
       affected_files_json,
@@ -187,6 +199,8 @@ export function createReviewsRepository(db: Database.Database): ReviewsRepositor
     ) VALUES (
       @reviewId,
       @title,
+      @workspaceRoot,
+      @projectName,
       @description,
       @diff,
       @affectedFilesJson,
@@ -308,6 +322,16 @@ export function createReviewsRepository(db: Database.Database): ReviewsRepositor
       params.lastActivityAt = input.lastActivityAt ?? null;
     }
 
+    if (input.diff !== undefined) {
+      assignments.push('diff = @diff');
+      params.diff = input.diff;
+    }
+
+    if (input.affectedFiles !== undefined) {
+      assignments.push('affected_files_json = @affectedFilesJson');
+      params.affectedFilesJson = JSON.stringify(input.affectedFiles);
+    }
+
     let sql = `UPDATE reviews SET ${assignments.join(', ')} WHERE review_id = @reviewId`;
 
     if (input.expectedClaimGeneration !== undefined) {
@@ -339,6 +363,8 @@ export function createReviewsRepository(db: Database.Database): ReviewsRepositor
       insertStatement.run({
         reviewId: input.reviewId,
         title: input.title,
+        workspaceRoot: input.workspaceRoot ?? null,
+        projectName: input.projectName ?? null,
         description: input.description,
         diff: input.diff,
         affectedFilesJson: JSON.stringify(input.affectedFiles),
@@ -455,6 +481,8 @@ function mapReviewRow(row: ReviewRow): ReviewRecord {
   return ReviewRecordSchema.parse({
     reviewId: row.review_id,
     title: row.title,
+    workspaceRoot: row.workspace_root,
+    projectName: row.project_name,
     description: row.description,
     diff: row.diff,
     affectedFiles: parseAffectedFiles(row.affected_files_json),
@@ -479,6 +507,8 @@ function mapReviewSummaryRow(row: ReviewRow): ReviewSummary {
   return ReviewSummarySchema.parse({
     reviewId: row.review_id,
     title: row.title,
+    workspaceRoot: row.workspace_root,
+    projectName: row.project_name,
     status: row.status,
     priority: row.priority,
     authorId: row.author_id,

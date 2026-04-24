@@ -1,12 +1,23 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createBrokerClient, createInProcessBrokerClient, startInProcessBrokerClient, type BrokerServiceLike } from '../src/index.js';
+import {
+  createBrokerClient,
+  createInProcessBrokerClient,
+  startInProcessBrokerClient,
+  type BrokerClient,
+  type BrokerServiceLike,
+} from '../src/index.js';
 
-import { REVIEWER_FIXTURE_PATH, WORKTREE_ROOT } from '../../review-broker-server/test/test-paths.js';
+import {
+  REVIEWER_FIXTURE_PATH,
+  TANDEM_CLI_PATH,
+  TSX_PATH,
+  WORKTREE_ROOT,
+} from '../../review-broker-server/test/test-paths.js';
 const tempDirectories: string[] = [];
 const openClients: Array<{ close(): void; waitUntilStopped(): Promise<void> }> = [];
 
@@ -229,6 +240,113 @@ describe('review-broker-client in-process client', () => {
     ]);
   });
 
+  it('auto-claims pending reviews when reviewer pool is enabled in-process', async () => {
+    const directory = mkdtempSync(path.join(os.tmpdir(), 'review-broker-client-pool-'));
+    tempDirectories.push(directory);
+
+    const dbPath = path.join(directory, 'pool.sqlite');
+    const configPath = path.join(directory, 'config.json');
+    const reviewerWorkerPath = path.join(
+      WORKTREE_ROOT,
+      'packages',
+      'review-broker-server',
+      'scripts',
+      'reviewer-worker.mjs',
+    );
+    const gsdStubPath = path.join(directory, 'gsd-stub.mjs');
+    const tandemWrapperPath = path.join(directory, 'tandem-wrapper.mjs');
+
+    writeFileSync(
+      configPath,
+      JSON.stringify(
+        {
+          reviewer_pool: {
+            max_pool_size: 1,
+            scaling_ratio: 1,
+            idle_timeout_seconds: 300,
+            max_ttl_seconds: 600,
+            claim_timeout_seconds: 300,
+            spawn_cooldown_seconds: 1,
+            background_check_interval_seconds: 5,
+          },
+        },
+        null,
+        2,
+      ) + '\n',
+      'utf8',
+    );
+
+    writeFileSync(
+      gsdStubPath,
+      `#!/usr/bin/env node\nprocess.stdout.write(JSON.stringify({ verdict: 'approved', reason: 'pool-test-approval' }) + '\\n');\n`,
+      'utf8',
+    );
+
+    writeFileSync(
+      tandemWrapperPath,
+      `#!/usr/bin/env node\n` +
+        `import { spawnSync } from 'node:child_process';\n` +
+        `const result = spawnSync(${JSON.stringify(TSX_PATH)}, [` +
+        `${JSON.stringify(TANDEM_CLI_PATH)}, ...process.argv.slice(2)], {\n` +
+        `  cwd: ${JSON.stringify(WORKTREE_ROOT)},\n` +
+        `  env: process.env,\n` +
+        `  encoding: 'utf8',\n` +
+        `});\n` +
+        `if (result.stdout) process.stdout.write(result.stdout);\n` +
+        `if (result.stderr) process.stderr.write(result.stderr);\n` +
+        `process.exit(result.status ?? 1);\n`,
+      'utf8',
+    );
+
+    chmodSync(gsdStubPath, 0o755);
+    chmodSync(tandemWrapperPath, 0o755);
+
+    const previousGsdCommand = process.env.REVIEWER_GSD_COMMAND;
+    const previousTandemCommand = process.env.REVIEWER_TANDEM_COMMAND;
+
+    process.env.REVIEWER_GSD_COMMAND = gsdStubPath;
+    process.env.REVIEWER_TANDEM_COMMAND = tandemWrapperPath;
+
+    try {
+      const started = startInProcessBrokerClient({
+        cwd: WORKTREE_ROOT,
+        dbPath,
+        handleSignals: false,
+        env: {
+          ...process.env,
+          REVIEW_BROKER_CONFIG_PATH: configPath,
+        },
+        poolSpawnCommand: process.execPath,
+        poolSpawnArgs: [reviewerWorkerPath],
+      });
+      openClients.push(started);
+
+      const created = await started.client.createReview({
+        title: 'Pool auto-claim test review',
+        description: 'Validates in-process pool spawning + claim propagation.',
+        diff: readFixture('valid-review.diff'),
+        authorId: 'pool-test-author',
+        priority: 'normal',
+      });
+
+      const claimed = await waitForClaimedReview(started.client, created.review.reviewId, 8_000);
+      expect(claimed.status).toBe('claimed');
+      expect(claimed.claimedBy).toMatch(/^reviewer_/);
+    } finally {
+      if (previousGsdCommand === undefined) {
+        delete process.env.REVIEWER_GSD_COMMAND;
+      } else {
+        process.env.REVIEWER_GSD_COMMAND = previousGsdCommand;
+      }
+
+      if (previousTandemCommand === undefined) {
+        delete process.env.REVIEWER_TANDEM_COMMAND;
+      } else {
+        process.env.REVIEWER_TANDEM_COMMAND = previousTandemCommand;
+      }
+    }
+  }, 15_000);
+
   it('rejects invalid requests before dispatching to the wrapped service', async () => {
     const harness = startHarness();
     const createReviewSpy = vi.fn(harness.runtime.service.createReview.bind(harness.runtime.service));
@@ -275,6 +393,28 @@ describe('review-broker-client in-process client', () => {
     });
   });
 });
+
+async function waitForClaimedReview(
+  client: BrokerClient,
+  reviewId: string,
+  timeoutMs: number,
+): Promise<Awaited<ReturnType<BrokerClient['getReviewStatus']>>['review']> {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const response = await client.getReviewStatus({ reviewId });
+    if (response.review.status === 'claimed') {
+      return response.review;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+
+  const latest = await client.getReviewStatus({ reviewId });
+  throw new Error(
+    `Timed out waiting for review ${reviewId} to be claimed. Latest status=${latest.review.status}`,
+  );
+}
 
 function startHarness(options: Parameters<typeof startInProcessBrokerClient>[0] = {}) {
   const directory = mkdtempSync(path.join(os.tmpdir(), 'review-broker-client-'));
