@@ -1475,6 +1475,76 @@ describe('pool integration tests', () => {
     expect(claimMeta.previousClaimedBy).toBe('stale-reviewer');
   });
 
+  it('claim timeout — does not reclaim a review owned by a live tracked reviewer', async () => {
+    const directory = mkdtempSync(path.join(os.tmpdir(), 'review-broker-pool-live-claim-'));
+    tempDirectories.push(directory);
+
+    const dbPath = path.join(directory, 'broker.sqlite');
+    const runtime = startBroker({
+      cwd: WORKTREE_ROOT,
+      dbPath,
+      handleSignals: false,
+    });
+    openRuntimes.push(runtime);
+
+    const review = await runtime.service.createReview({
+      title: 'Live claim timeout test',
+      description: 'desc',
+      diff: readFixture('valid-review.diff'),
+      authorId: 'author-1',
+      priority: 'normal',
+    });
+
+    const claimed = await runtime.service.claimReview({
+      reviewId: review.review.reviewId,
+      claimantId: 'live-reviewer',
+    });
+    expect(claimed.outcome).toBe('claimed');
+
+    const isProcessAlive = vi.spyOn(runtime.context.reviewerManager, 'isProcessAlive').mockReturnValue(true);
+
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+
+    const shortPoolManager = createPoolManager({
+      reviewerManager: runtime.context.reviewerManager,
+      reviewers: runtime.context.reviewers,
+      reviews: runtime.context.reviews,
+      audit: runtime.context.audit,
+      poolConfig: {
+        max_pool_size: 3,
+        idle_timeout_seconds: 300,
+        max_ttl_seconds: 3600,
+        claim_timeout_seconds: 1,
+        spawn_cooldown_seconds: 1,
+        scaling_ratio: 1,
+        background_check_interval_seconds: 0.1,
+      },
+      notifications: runtime.context.notifications,
+      spawnCommand: process.execPath,
+      spawnArgs: [path.resolve(WORKTREE_ROOT, FIXTURE_PATH)],
+    });
+
+    shortPoolManager.startBackgroundLoop();
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    shortPoolManager.stopBackgroundLoop();
+
+    const reviewAfter = runtime.context.reviews.getById(review.review.reviewId);
+    expect(reviewAfter).toMatchObject({
+      status: 'claimed',
+      claimedBy: 'live-reviewer',
+    });
+
+    const claimEvents = runtime.context.db
+      .prepare<unknown[], { event_type: string }>(
+        `SELECT event_type FROM audit_events WHERE event_type = 'pool.claim_timeout'`,
+      )
+      .all();
+    expect(claimEvents).toHaveLength(0);
+    expect(isProcessAlive).toHaveBeenCalledWith('live-reviewer');
+
+    isProcessAlive.mockRestore();
+  });
+
   it('pool-spawned reviewers have the pool sessionToken persisted in the DB', async () => {
     const { runtime } = createRuntimeHarness({
       scaling_ratio: 1,

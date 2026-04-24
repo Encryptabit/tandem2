@@ -47,6 +47,11 @@ export interface StartBrokerOptions extends CreateAppContextOptions, CreateBroke
    * Defaults to true.
    */
   enablePool?: boolean;
+  /**
+   * Recover reviewers left online by an earlier broker process.
+   * Defaults to true for long-lived broker/dashboard processes.
+   */
+  enableStartupRecovery?: boolean;
   /** Command used to spawn pool reviewer processes. Required when poolConfig is set. */
   poolSpawnCommand?: string;
   /** Arguments for the pool reviewer spawn command. */
@@ -157,7 +162,10 @@ export interface StartedBrokerRuntime {
 export function startBroker(options: StartBrokerOptions = {}): StartedBrokerRuntime {
   const context = createAppContext(options);
   const service = createBrokerService(context, options);
-  const startupRecovery = reconcileStartupRecovery(context, options.now);
+  const startupRecovery =
+    options.enableStartupRecovery === false
+      ? emptyStartupRecoverySnapshot(options.now)
+      : reconcileStartupRecovery(context, options.now);
   const startedAt = options.now ? options.now() : new Date().toISOString();
 
   // Create pool manager if pool configuration is present and we can resolve a reviewer worker command.
@@ -266,6 +274,18 @@ export function startBroker(options: StartBrokerOptions = {}): StartedBrokerRunt
     getShutdownSnapshot: () => shutdownSnapshot,
     getStartupRecoverySnapshot: () => startupRecovery,
     getPoolStartupRecoverySnapshot: () => poolRecovery,
+  };
+}
+
+function emptyStartupRecoverySnapshot(nowFactory: (() => string) | undefined): BrokerStartupRecoverySnapshot {
+  const now = nowFactory ?? (() => new Date().toISOString());
+  return {
+    completedAt: now(),
+    recoveredReviewerIds: [],
+    reclaimedReviewIds: [],
+    staleReviewIds: [],
+    unrecoverableReviewIds: [],
+    reviewers: [],
   };
 }
 

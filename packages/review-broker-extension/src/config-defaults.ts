@@ -8,10 +8,15 @@ const DEFAULT_POOL_CONFIG = {
   max_pool_size: 3,
   scaling_ratio: 1,
   idle_timeout_seconds: 300,
-  max_ttl_seconds: 600,
-  claim_timeout_seconds: 300,
+  max_ttl_seconds: 3600,
+  claim_timeout_seconds: 1800,
   spawn_cooldown_seconds: 5,
   background_check_interval_seconds: 10,
+} as const;
+
+const LEGACY_POOL_DEFAULTS = {
+  max_ttl_seconds: 600,
+  claim_timeout_seconds: 300,
 } as const;
 
 type JsonObject = Record<string, unknown>;
@@ -179,6 +184,12 @@ export function ensureReviewBrokerConfigDefaults(
     for (const [key, value] of Object.entries(DEFAULT_POOL_CONFIG)) {
       if (reviewerPoolConfig[key] === undefined) {
         reviewerPoolConfig[key] = value;
+        updated = true;
+      }
+    }
+    for (const [key, legacyValue] of Object.entries(LEGACY_POOL_DEFAULTS)) {
+      if (reviewerPoolConfig[key] === legacyValue) {
+        reviewerPoolConfig[key] = DEFAULT_POOL_CONFIG[key as keyof typeof LEGACY_POOL_DEFAULTS];
         updated = true;
       }
     }
