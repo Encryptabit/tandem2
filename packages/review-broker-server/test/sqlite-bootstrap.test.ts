@@ -59,6 +59,8 @@ describe('review-broker-server SQLite bootstrap', () => {
         expect.arrayContaining([
           'claim_generation',
           'claimed_at',
+          'workspace_root',
+          'project_name',
           'current_round',
           'latest_verdict',
           'verdict_reason',
@@ -99,19 +101,22 @@ describe('review-broker-server SQLite bootstrap', () => {
           'idx_reviewers_session_token',
           'idx_reviewers_updated_at',
           'idx_reviews_claimed_by_status_updated_at',
+          'idx_reviews_project_updated_at',
         ]),
       );
-      expect(migrations).toHaveLength(4);
+      expect(migrations).toHaveLength(5);
       expect(migrations.map((migration) => migration.id)).toEqual([
         '001_init',
         '002_review_lifecycle_parity',
         '003_reviewer_lifecycle',
         '004_pool_management',
+        '005_review_project_identity',
       ]);
       expect(migrations[0]?.checksum).toHaveLength(64);
       expect(migrations[1]?.checksum).toHaveLength(64);
       expect(migrations[2]?.checksum).toHaveLength(64);
       expect(migrations[3]?.checksum).toHaveLength(64);
+      expect(migrations[4]?.checksum).toHaveLength(64);
       expect(opened.pragmas).toEqual({
         journalMode: 'WAL',
         busyTimeoutMs: 5_000,
@@ -141,6 +146,7 @@ describe('review-broker-server SQLite bootstrap', () => {
         { id: '002_review_lifecycle_parity' },
         { id: '003_reviewer_lifecycle' },
         { id: '004_pool_management' },
+        { id: '005_review_project_identity' },
       ]);
     } finally {
       secondOpen.close();

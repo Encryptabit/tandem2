@@ -28,12 +28,17 @@ venv/
 target/
 vendor/
 *.log
+*.tsbuildinfo
 coverage/
 .cache/
 tmp/
+.tmp/
+.tmp-ext-*/
 .tmp-review-*/
 .tmp-review-runtime-proof/
 packages/review-broker-server/.tmp/
+.claude/
+setup-permissions.sh
 
 # ── GSD baseline (auto-generated) ──
 .gsd-id

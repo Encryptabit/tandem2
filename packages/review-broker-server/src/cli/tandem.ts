@@ -833,12 +833,28 @@ async function handleDiscussionAdd(
   const id = requireId(args, 'discussion add');
   const actor = requireFlag(args, '--actor', 'discussion add');
   const body = requireFlag(args, '--body', 'discussion add');
+  const diffFile = extractFlagWithEquals(args, '--diff-file');
 
-  const response = await runtime.service.addMessage({
+  let diff: string | undefined;
+  if (diffFile !== undefined) {
+    const resolvedPath = path.resolve(diffFile);
+    try {
+      diff = readFileSync(resolvedPath, 'utf8');
+    } catch {
+      throw new Error(`Cannot read diff file: "${resolvedPath}" — file not found.`);
+    }
+  }
+
+  const request: Parameters<typeof runtime.service.addMessage>[0] = {
     reviewId: id,
     actorId: actor,
     body,
-  });
+  };
+  if (diff !== undefined) {
+    request.diff = diff;
+  }
+
+  const response = await runtime.service.addMessage(request);
 
   if (options.json) {
     process.stdout.write(formatJson(response) + '\n');
@@ -1101,7 +1117,7 @@ Options:
   --json           Output as JSON
   -h, --help       Show this help message
 `,
-  'discussion add': `Usage: tandem discussion add <id> --actor <actorId> --body <text> [options]
+  'discussion add': `Usage: tandem discussion add <id> --actor <actorId> --body <text> [--diff-file <path>] [options]
 
 Add a message to a review's discussion thread.
 
@@ -1111,6 +1127,7 @@ Arguments:
 Options:
   --actor <id>     Actor posting the message (required)
   --body <text>    Message body (required)
+  --diff-file <p>  Optional replacement proposal diff for proposer requeues
   --json           Output as JSON
   -h, --help       Show this help message
 `,
@@ -1147,6 +1164,7 @@ Start the broker dashboard HTTP server.
 Options:
   --port <port>    HTTP port (default: 0 = OS-assigned)
   --host <host>    HTTP host (default: 127.0.0.1)
+  --db-path <path> Override database path; defaults to local extension DB when detected, otherwise global
   --json           Output as JSON (prints { url, port, dashboardDistPath })
   -h, --help       Show this help message
 `,
@@ -1376,6 +1394,7 @@ async function main(): Promise<void> {
       handleSignals: false,
       ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
       ...(options.dbPath !== undefined ? { dbPath: options.dbPath } : {}),
+      ...(noun === 'dashboard' ? { preferLocalExtensionDb: true } : {}),
     });
 
     await dispatch(noun, verb, subcommandRest, runtime, options);

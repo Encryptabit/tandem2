@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 
 import {
   AcceptCounterPatchRequestSchema,
@@ -65,6 +66,7 @@ import {
   type ReviewActivityEntry,
   type ReviewDiscussionMessage,
   type ReviewMessageAuthorRole,
+  type ReviewProposal,
   type ReviewRecord,
   type ReviewReclaimCause,
   type ReviewSummary,
@@ -236,10 +238,13 @@ export function createBrokerService(context: AppContext, options: CreateBrokerSe
 
       const createdAt = now();
       const reviewId = reviewIdFactory();
+      const projectName = inferProjectName(context.workspaceRoot);
       const persistedReview = context.db.transaction(() => {
         const review = context.reviews.insert({
           reviewId,
           title: request.title,
+          workspaceRoot: context.workspaceRoot,
+          projectName,
           description: request.description,
           diff: request.diff,
           affectedFiles: validatedDiff.affectedFiles,
@@ -798,6 +803,79 @@ export function createBrokerService(context: AppContext, options: CreateBrokerSe
       }
 
       const actorRole = getAuthorRole(current, request.actorId);
+      let validatedCounterPatch: { diff: string; affectedFiles: string[]; fileCount: number } | null = null;
+
+      if (request.diff !== undefined) {
+        const canReplaceProposal = current.status === 'changes_requested' && actorRole === 'proposer';
+
+        if (!canReplaceProposal) {
+          persistTransitionRejection({
+            context,
+            review: current,
+            actorId: request.actorId,
+            statusTo: current.status,
+            errorCode: 'INVALID_REVIEW_TRANSITION',
+            createdAt: now(),
+            metadata: {
+              reviewId: current.reviewId,
+              attemptedEvent: 'add_message',
+              outcome: 'invalid_diff_update_context',
+              status: current.status,
+              authorRole: actorRole,
+            },
+          });
+
+          throw new BrokerServiceError({
+            code: 'INVALID_REVIEW_TRANSITION',
+            reviewId: current.reviewId,
+            message: `Review ${current.reviewId} only accepts proposal diff updates from the proposer while requeueing changes_requested.`,
+          });
+        }
+
+        try {
+          const validated = validateReviewDiff({
+            diff: request.diff,
+            workspaceRoot: context.workspaceRoot,
+          });
+
+          validatedCounterPatch = {
+            diff: request.diff,
+            affectedFiles: validated.affectedFiles,
+            fileCount: validated.fileCount,
+          };
+        } catch (error) {
+          if (error instanceof DiffValidationError) {
+            const createdAt = now();
+            context.db.transaction(() => {
+              context.audit.append({
+                reviewId: current.reviewId,
+                eventType: 'review.diff_rejected',
+                actorId: request.actorId,
+                errorCode: error.code,
+                createdAt,
+                metadata: {
+                  reviewId: current.reviewId,
+                  authorId: request.actorId,
+                  title: current.title,
+                  workspaceRoot: context.workspaceRoot,
+                  affectedFiles: error.affectedFiles,
+                  attemptedEvent: 'add_message',
+                  roundNumber: current.currentRound + 1,
+                },
+              });
+            })();
+
+            throw new BrokerServiceError({
+              code: error.code === 'DIFF_VALIDATION_FAILED' ? 'DIFF_VALIDATION_FAILED' : 'INVALID_DIFF',
+              reviewId: current.reviewId,
+              message: error.message,
+            });
+          }
+
+          throw error;
+        }
+      }
+
       const createdAt = now();
       const updated = context.db.transaction(() => {
         let workingReview = current;
@@ -862,6 +940,12 @@ export function createBrokerService(context: AppContext, options: CreateBrokerSe
             counterPatchDecisionActorId: null,
             counterPatchDecisionNote: null,
             counterPatchDecidedAt: null,
+            ...(validatedCounterPatch
+              ? {
+                  diff: validatedCounterPatch.diff,
+                  affectedFiles: validatedCounterPatch.affectedFiles,
+                }
+              : {}),
             updatedAt: createdAt,
             lastActivityAt: createdAt,
           });
@@ -881,6 +965,13 @@ export function createBrokerService(context: AppContext, options: CreateBrokerSe
               reviewId: current.reviewId,
               roundNumber,
               counterPatchStatus: 'pending',
+              proposalUpdated: validatedCounterPatch !== null,
+              ...(validatedCounterPatch
+                ? {
+                    affectedFiles: validatedCounterPatch.affectedFiles,
+                    fileCount: validatedCounterPatch.fileCount,
+                  }
+                : {}),
               summary: 'Proposer requeued the review with follow-up changes.',
             },
           });
@@ -1363,6 +1454,8 @@ function toReviewSummary(review: ReviewRecord): ReviewSummary {
   return {
     reviewId: review.reviewId,
     title: review.title,
+    workspaceRoot: review.workspaceRoot,
+    projectName: review.projectName,
     status: review.status,
     priority: review.priority,
     authorId: review.authorId,
@@ -1380,23 +1473,12 @@ function toReviewSummary(review: ReviewRecord): ReviewSummary {
   };
 }
 
-function toReviewProposal(review: ReviewRecord): {
-  reviewId: string;
-  title: string;
-  description: string;
-  diff: string;
-  affectedFiles: string[];
-  priority: ReviewRecord['priority'];
-  currentRound: number;
-  latestVerdict: ReviewRecord['latestVerdict'];
-  verdictReason: string | null;
-  counterPatchStatus: ReviewRecord['counterPatchStatus'];
-  lastMessageAt: string | null;
-  lastActivityAt: string | null;
-} {
+function toReviewProposal(review: ReviewRecord): ReviewProposal {
   return {
     reviewId: review.reviewId,
     title: review.title,
+    workspaceRoot: review.workspaceRoot,
+    projectName: review.projectName,
     description: review.description,
     diff: review.diff,
     affectedFiles: review.affectedFiles,
@@ -1408,4 +1490,8 @@ function toReviewProposal(review: ReviewRecord): {
     lastMessageAt: review.lastMessageAt,
     lastActivityAt: review.lastActivityAt,
   };
+}
+
+function inferProjectName(workspaceRoot: string): string {
+  return path.basename(workspaceRoot) || workspaceRoot;
 }

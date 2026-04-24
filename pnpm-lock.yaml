@@ -45,6 +45,15 @@ importers:
         specifier: ^5.7.10
         version: 5.18.1(@types/node@22.19.15)(rollup@4.59.1)(tsx@4.21.0)(typescript@5.9.3)
 
+  packages/review-broker-extension:
+    dependencies:
+      review-broker-client:
+        specifier: workspace:*
+        version: link:../review-broker-client
+      review-broker-core:
+        specifier: workspace:*
+        version: link:../review-broker-core
+
   packages/review-broker-server:
     dependencies:
       '@gsd/pi-agent-core':

@@ -287,6 +287,78 @@ describe('review-broker-server discussion flows', () => {
       summary: 'Proposer added a follow-up message for round 2.',
     });
   });
+
+  it('requeues proposer follow-up with a replacement diff and updates the canonical proposal payload', async () => {
+    const harness = createHarness([
+      '2026-03-21T12:00:00.000Z',
+      '2026-03-21T12:01:00.000Z',
+      '2026-03-21T12:02:00.000Z',
+      '2026-03-21T12:03:00.000Z',
+    ]);
+
+    const originalDiff = readFixture('valid-review.diff');
+    const replacementDiff = [
+      'diff --git a/packages/review-broker-server/src/runtime/_proposal_fixture_round2.ts b/packages/review-broker-server/src/runtime/_proposal_fixture_round2.ts',
+      'new file mode 100644',
+      'index 0000000..6c55ed8',
+      '--- /dev/null',
+      '+++ b/packages/review-broker-server/src/runtime/_proposal_fixture_round2.ts',
+      '@@ -0,0 +1,3 @@',
+      "+export const proposalFixtureRound2 = 'round2';",
+      '+',
+      '+console.log(proposalFixtureRound2);',
+      '',
+    ].join('\n');
+
+    const created = await harness.service.createReview({
+      title: 'Counter-patch diff replacement review',
+      description: 'Verify proposer follow-up can replace the canonical proposal diff.',
+      diff: originalDiff,
+      authorId: 'agent-author',
+      priority: 'normal',
+    });
+
+    await harness.service.claimReview({
+      reviewId: created.review.reviewId,
+      claimantId: 'agent-reviewer',
+    });
+
+    await harness.service.submitVerdict({
+      reviewId: created.review.reviewId,
+      actorId: 'agent-reviewer',
+      verdict: 'changes_requested',
+      reason: 'Please revise and resubmit the proposal patch.',
+    });
+
+    const requeued = await harness.service.addMessage({
+      reviewId: created.review.reviewId,
+      actorId: 'agent-author',
+      body: 'Posted round-two patch with requested fixes.',
+      diff: replacementDiff,
+    });
+
+    expect(requeued.review).toMatchObject({
+      reviewId: created.review.reviewId,
+      status: 'pending',
+      currentRound: 2,
+      counterPatchStatus: 'pending',
+      lastMessageAt: '2026-03-21T12:03:00.000Z',
+    });
+
+    const proposal = await harness.service.getProposal({ reviewId: created.review.reviewId });
+    expect(proposal.proposal.diff).toBe(replacementDiff);
+    expect(proposal.proposal.affectedFiles).toEqual([
+      'packages/review-broker-server/src/runtime/_proposal_fixture_round2.ts',
+    ]);
+
+    const activity = await harness.service.getActivityFeed({ reviewId: created.review.reviewId });
+    const requeueEvent = activity.activity.find((entry) => entry.eventType === 'review.requeued');
+    expect(requeueEvent).toBeDefined();
+    expect(requeueEvent?.metadata).toMatchObject({
+      proposalUpdated: true,
+      fileCount: 1,
+    });
+  });
 });
 
 function createHarness(timestamps: string[]): { context: AppContext; service: ReturnType<typeof createBrokerService> } {

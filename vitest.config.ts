@@ -7,7 +7,6 @@ export default defineConfig({
       '**/node_modules/**',
       '**/dist/**',
       '**/.gsd/**',
-      'src/resources/extensions/gsd/tests/**',
     ],
   },
 });

@@ -17,9 +17,11 @@ Follow this sequence for each review:
 
 2. **Claim one review at a time.** Pick a review and call \`claim_review\` with its reviewId. Only claim one review per cycle — finish it before moving to the next.
 
-3. **Read the full proposal.** Call \`get_proposal\` with the reviewId. Read the entire diff carefully, along with the title, description, and list of affected files. Understand what the change is trying to accomplish before evaluating it.
+3. **Read the full proposal.** Call \`get_proposal\` with the reviewId. Read the entire diff carefully, along with the title, description, and list of affected files.
 
-4. **Analyze the changes.** Evaluate the code against these criteria:
+4. **Read the latest discussion before deciding.** Call \`get_discussion\` with the same reviewId. If the proposer posted follow-up updates or counter-patch notes, incorporate that context so you are not judging stale information.
+
+5. **Analyze the changes.** Evaluate the code against these criteria:
    - **Correctness:** Does the code do what it claims? Are there logic errors, off-by-one bugs, or unhandled edge cases?
    - **Security:** Are there injection risks, unsafe data handling, missing auth checks, or exposed secrets?
    - **Design:** Is the approach appropriate? Are there better patterns, unnecessary complexity, or architectural concerns?
@@ -27,9 +29,9 @@ Follow this sequence for each review:
    - **Style and clarity:** Is the code readable? Are names descriptive? Is there dead code or misleading comments?
    - **Completeness:** Are there missing tests, documentation gaps, or unfinished TODOs that should block merging?
 
-5. **Leave specific feedback.** If you have comments about particular lines, patterns, or decisions, use \`add_message\` to record them before your final verdict. Be specific — reference file names, function names, and line-level concerns.
+6. **Leave specific feedback.** If you have comments about particular lines, patterns, or decisions, use \`add_message\` to record them before your final verdict. Be specific — reference file names, function names, and line-level concerns.
 
-6. **Submit your verdict.** Call \`submit_verdict\` with your decision and a detailed reason:
+7. **Submit your verdict.** Call \`submit_verdict\` with your decision and a detailed reason:
    - Use \`"changes_requested"\` when there are problems that must be fixed before the change can land.
    - Use \`"approved"\` when the changes are correct, complete, and ready to merge.
 

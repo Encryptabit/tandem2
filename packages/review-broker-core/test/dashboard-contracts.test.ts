@@ -421,6 +421,7 @@ describe('dashboard transport contracts', () => {
   const VALID_REVIEW_LIST_ITEM = {
     reviewId: 'rev-001',
     title: 'Fix broken tests',
+    projectName: 'tandem2',
     status: 'pending',
     priority: 'normal',
     authorId: 'author-1',
@@ -442,6 +443,7 @@ describe('dashboard transport contracts', () => {
       const item = DashboardReviewListItemSchema.parse(VALID_REVIEW_LIST_ITEM);
       expect(item.reviewId).toBe('rev-001');
       expect(item.title).toBe('Fix broken tests');
+      expect(item.projectName).toBe('tandem2');
       expect(item.status).toBe('pending');
       expect(item.claimedBy).toBeNull();
       expect(item.currentRound).toBe(1);

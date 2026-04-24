@@ -1,0 +1,30 @@
+{
+  "name": "review-broker-extension",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "tandem-review-install": "./bin/tandem-review-install.mjs"
+  },
+  "files": [
+    "dist",
+    "bin"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "review-broker-client": "workspace:*",
+    "review-broker-core": "workspace:*"
+  },
+  "pi": {
+    "extensions": ["./dist/index.js"]
+  }
+}

@@ -16,6 +16,7 @@
 interface DashboardReviewListItem {
   reviewId: string;
   title: string;
+  projectName: string | null;
   status: string;
   priority: string;
   authorId: string;
@@ -96,6 +97,9 @@ let lastRefreshAt: Date | null = null;
 let activeStatusFilter: StatusFilter = 'all';
 let eventSource: EventSource | null = null;
 let isFetching = false;
+let refreshTimer: number | null = null;
+
+const CROSS_PROCESS_REFRESH_MS = 10_000;
 
 // ---------------------------------------------------------------------------
 // Connection state management
@@ -180,11 +184,13 @@ async function fetchList(): Promise<void> {
 // Data fetching — detail
 // ---------------------------------------------------------------------------
 
-async function fetchDetail(reviewId: string): Promise<void> {
+async function fetchDetail(reviewId: string, options: { showLoading?: boolean } = {}): Promise<void> {
   if (isFetching) return;
   isFetching = true;
 
-  reviewsRoot.innerHTML = '<div class="loading-state">Loading review…</div>';
+  if (options.showLoading !== false) {
+    reviewsRoot.innerHTML = '<div class="loading-state">Loading review…</div>';
+  }
 
   try {
     const res = await fetch(`/api/reviews/${encodeURIComponent(reviewId)}`);
@@ -284,6 +290,7 @@ function renderReviewRow(review: DashboardReviewListItem): string {
         <span class="event-meta timestamp">${formatRelativeTime(review.updatedAt)}</span>
       </div>
       <div class="review-row-meta">
+        ${renderProjectBadge(review)}
         <span class="review-id">${escapeHtml(review.reviewId)}</span>
         <span class="event-actor">${escapeHtml(review.authorId)}</span>
         ${review.claimedBy ? `<span class="event-actor">claimed by ${escapeHtml(review.claimedBy)}</span>` : ''}
@@ -308,6 +315,7 @@ function renderDetailView(detail: ReviewDetailResponse): void {
       <span class="status-chip ${statusClass}"><span class="status-dot ${statusClass}"></span>${escapeHtml(review.status)}</span>
       <h2 class="detail-title">${escapeHtml(review.title)}</h2>
       <div class="detail-meta">
+        ${renderProjectBadge(review)}
         <span class="review-id">${escapeHtml(review.reviewId)}</span>
         <span class="event-actor">by ${escapeHtml(review.authorId)}</span>
         <span class="detail-label">Round ${review.currentRound}</span>
@@ -332,7 +340,7 @@ function renderDetailView(detail: ReviewDetailResponse): void {
               <span class="detail-label">Affected files</span>
               <ul>${proposal.affectedFiles.map((f) => `<li><code>${escapeHtml(f)}</code></li>`).join('')}</ul>
             </div>` : ''}
-          <pre class="diff-block"><code>${escapeHtml(proposal.diff)}</code></pre>
+          ${renderDiffBlock(proposal.diff)}
         </div>
       </div>
     </div>`;
@@ -361,6 +369,48 @@ function renderDetailView(detail: ReviewDetailResponse): void {
     ${proposalSection}
     ${discussionSection}
     ${activitySection}`;
+}
+
+function renderProjectBadge(review: Pick<DashboardReviewListItem, 'projectName'>): string {
+  if (!review.projectName) return '';
+  return `<span class="project-badge">${escapeHtml(review.projectName)}</span>`;
+}
+
+function renderDiffBlock(diff: string): string {
+  const normalized = diff.replace(/\r\n/g, '\n');
+  const lines = normalized.length > 0 ? normalized.split('\n') : [];
+
+  if (lines.length === 0) {
+    return '<div class="diff-block diff-empty">No diff available.</div>';
+  }
+
+  const renderedLines = lines
+    .map((line) => `<span class="diff-line ${getDiffLineClass(line)}">${escapeHtml(line)}</span>`)
+    .join('');
+
+  return `<div class="diff-block" role="region" aria-label="Proposal unified diff"><code>${renderedLines}</code></div>`;
+}
+
+function getDiffLineClass(line: string): string {
+  if (line.startsWith('diff --git')) return 'diff-line-file';
+  if (line.startsWith('@@')) return 'diff-line-hunk';
+  if (line.startsWith('+++ ')) return 'diff-line-added diff-line-boundary';
+  if (line.startsWith('--- ')) return 'diff-line-removed diff-line-boundary';
+  if (line.startsWith('+')) return 'diff-line-added';
+  if (line.startsWith('-')) return 'diff-line-removed';
+  if (
+    line.startsWith('index ') ||
+    line.startsWith('new file mode ') ||
+    line.startsWith('deleted file mode ') ||
+    line.startsWith('similarity index ') ||
+    line.startsWith('rename from ') ||
+    line.startsWith('rename to ') ||
+    line.startsWith('\\ ')
+  ) {
+    return 'diff-line-meta';
+  }
+
+  return 'diff-line-context';
 }
 
 function renderDiscussionEntry(msg: ReviewDiscussionMessage): string {
@@ -406,7 +456,7 @@ function connectSSE(): void {
   eventSource = new EventSource('/api/events');
 
   eventSource.addEventListener('change', () => {
-    refreshCurrentView();
+    void refreshCurrentView({ showLoading: false });
   });
 
   eventSource.addEventListener('heartbeat', () => {
@@ -426,14 +476,30 @@ function connectSSE(): void {
   };
 }
 
-async function refreshCurrentView(): Promise<void> {
+async function refreshCurrentView(options: { showLoading?: boolean } = {}): Promise<void> {
   const reviewId = getActiveReviewId();
   if (reviewId) {
-    await fetchDetail(reviewId);
+    await fetchDetail(reviewId, options);
   } else {
     await fetchList();
   }
 }
+
+function startPeriodicRefresh(): void {
+  if (refreshTimer !== null) return;
+
+  refreshTimer = window.setInterval(() => {
+    if (document.visibilityState === 'visible') {
+      void refreshCurrentView({ showLoading: false });
+    }
+  }, CROSS_PROCESS_REFRESH_MS);
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    void refreshCurrentView({ showLoading: false });
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Browser history support
@@ -539,6 +605,7 @@ function init(): void {
     fetchList();
   }
   connectSSE();
+  startPeriodicRefresh();
 }
 
 init();

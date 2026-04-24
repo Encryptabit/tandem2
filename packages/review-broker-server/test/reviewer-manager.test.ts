@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -127,6 +127,28 @@ describe('review-broker-server reviewer manager', () => {
       reviewerId: 'reviewer-fixture-1',
       offlineReason: 'operator_kill',
     });
+  });
+
+  it('passes REVIEW_BROKER_DB_PATH to spawned reviewer processes', async () => {
+    const harness = createHarness();
+    const envOutputPath = path.join(path.dirname(harness.context.dbPath), 'reviewer-db-path.txt');
+
+    const script = [
+      `require('node:fs').writeFileSync(${JSON.stringify(envOutputPath)}, process.env.REVIEW_BROKER_DB_PATH || '', 'utf8');`,
+      'setInterval(() => {}, 1000);',
+    ].join(' ');
+
+    await harness.context.reviewerManager.spawnReviewer({
+      reviewerId: 'reviewer-env-check',
+      command: process.execPath,
+      args: ['-e', script],
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(readFileSync(envOutputPath, 'utf8')).toBe(harness.context.dbPath);
+
+    const stopped = await harness.context.reviewerManager.stopReviewer('reviewer-env-check');
+    expect(stopped.outcome).toBe('killed');
   });
 
   it('supports detached reviewer spawn that survives context close', async () => {

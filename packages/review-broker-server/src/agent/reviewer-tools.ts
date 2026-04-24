@@ -4,7 +4,7 @@ import type { AgentTool, AgentToolResult } from '@gsd/pi-agent-core';
 import type { BrokerService } from '../runtime/broker-service.js';
 
 /**
- * Creates the 6 AgentTools that wrap BrokerService methods for the reviewer agent.
+ * Creates the 7 AgentTools that wrap BrokerService methods for the reviewer agent.
  *
  * The `reviewerId` is captured in the closure and injected as `claimantId` / `actorId`
  * where the BrokerService expects it — the LLM never sees or provides these fields.
@@ -84,6 +84,20 @@ export function createReviewerAgentTools(
     },
   };
 
+  const getDiscussion: AgentTool<any> = {
+    name: 'get_discussion',
+    description:
+      'Get the full discussion thread for a review, including proposer follow-ups and reviewer comments. Use this to inspect counter-patch updates before submitting a verdict.',
+    parameters: Type.Object({
+      reviewId: Type.String({ description: 'The ID of the review to get discussion for' }),
+    }),
+    label: 'Get Discussion',
+    async execute(_toolCallId, params) {
+      const result = await brokerService.getDiscussion({ reviewId: params.reviewId });
+      return textResult(result);
+    },
+  };
+
   const submitVerdict: AgentTool<any> = {
     name: 'submit_verdict',
     description:
@@ -126,5 +140,5 @@ export function createReviewerAgentTools(
     },
   };
 
-  return [listReviews, claimReview, getProposal, getReviewStatus, submitVerdict, addMessage];
+  return [listReviews, claimReview, getProposal, getReviewStatus, getDiscussion, submitVerdict, addMessage];
 }

@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   REVIEW_BROKER_CONFIG_PATH_ENV,
   REVIEW_BROKER_DB_PATH_ENV,
+  TANDEM_BROKER_DB_ENV,
   findWorkspaceRoot,
   resolveBrokerPaths,
 } from '../src/runtime/path-resolution.js';
@@ -78,6 +79,107 @@ describe('review-broker-server path resolution', () => {
     expect(resolved.dbPath).toBe(path.join('/tmp/test-state-home', 'tandem2', 'review-broker.sqlite'));
     expect(resolved.configPath).toBe(path.join(workspaceRoot, '.gsd', 'review-broker', 'config.json'));
   });
+
+  it('can prefer the local Tandem extension database when the extension database is present', () => {
+    const { workspaceRoot, nestedCwd } = createWorkspaceFixture();
+    installLocalTandemExtensionMarker(workspaceRoot);
+    installLocalTandemBrokerDb(workspaceRoot);
+
+    const resolved = resolveBrokerPaths({
+      cwd: nestedCwd,
+      homeDir: '/home/tester',
+      env: {
+        HOME: '/home/tester',
+        XDG_STATE_HOME: '/tmp/test-state-home',
+      },
+      preferLocalExtensionDb: true,
+    });
+
+    expect(resolved.dbPathSource).toBe('local-extension');
+    expect(resolved.dbPath).toBe(path.join(workspaceRoot, '.gsd', 'review-broker', 'broker.db'));
+  });
+
+  it('falls back to the global default when a local Tandem extension exists without a local database', () => {
+    const { workspaceRoot, nestedCwd } = createWorkspaceFixture();
+    installLocalTandemExtensionMarker(workspaceRoot);
+
+    const resolved = resolveBrokerPaths({
+      cwd: nestedCwd,
+      homeDir: '/home/tester',
+      env: {
+        HOME: '/home/tester',
+        XDG_STATE_HOME: '/tmp/test-state-home',
+      },
+      preferLocalExtensionDb: true,
+    });
+
+    expect(resolved.dbPathSource).toBe('default');
+    expect(resolved.dbPath).toBe(path.join('/tmp/test-state-home', 'tandem2', 'review-broker.sqlite'));
+  });
+
+  it('uses TANDEM_BROKER_DB when preferring a local Tandem extension database', () => {
+    const { workspaceRoot, nestedCwd } = createWorkspaceFixture();
+    installLocalTandemExtensionMarker(workspaceRoot);
+
+    const resolved = resolveBrokerPaths({
+      cwd: nestedCwd,
+      env: {
+        HOME: '/home/tester',
+        [TANDEM_BROKER_DB_ENV]: './custom/local-broker.sqlite',
+      },
+      preferLocalExtensionDb: true,
+    });
+
+    expect(resolved.dbPathSource).toBe('local-extension');
+    expect(resolved.dbPath).toBe(path.resolve(nestedCwd, './custom/local-broker.sqlite'));
+  });
+
+  it('keeps env and argument database overrides above local Tandem extension discovery', () => {
+    const { workspaceRoot, nestedCwd } = createWorkspaceFixture();
+    installLocalTandemExtensionMarker(workspaceRoot);
+
+    const envResolved = resolveBrokerPaths({
+      cwd: nestedCwd,
+      env: {
+        HOME: '/home/tester',
+        [REVIEW_BROKER_DB_PATH_ENV]: './runtime/from-env.sqlite',
+      },
+      preferLocalExtensionDb: true,
+    });
+
+    expect(envResolved.dbPathSource).toBe('env');
+    expect(envResolved.dbPath).toBe(path.resolve(nestedCwd, './runtime/from-env.sqlite'));
+
+    const argumentResolved = resolveBrokerPaths({
+      cwd: nestedCwd,
+      dbPath: './runtime/explicit.sqlite',
+      env: {
+        HOME: '/home/tester',
+        [REVIEW_BROKER_DB_PATH_ENV]: './runtime/from-env.sqlite',
+      },
+      preferLocalExtensionDb: true,
+    });
+
+    expect(argumentResolved.dbPathSource).toBe('argument');
+    expect(argumentResolved.dbPath).toBe(path.resolve(nestedCwd, './runtime/explicit.sqlite'));
+  });
+
+  it('falls back to the global default when local extension DB preference is requested without a local install', () => {
+    const { nestedCwd } = createWorkspaceFixture();
+
+    const resolved = resolveBrokerPaths({
+      cwd: nestedCwd,
+      homeDir: '/home/tester',
+      env: {
+        HOME: '/home/tester',
+        XDG_STATE_HOME: '/tmp/test-state-home',
+      },
+      preferLocalExtensionDb: true,
+    });
+
+    expect(resolved.dbPathSource).toBe('default');
+    expect(resolved.dbPath).toBe(path.join('/tmp/test-state-home', 'tandem2', 'review-broker.sqlite'));
+  });
 });
 
 function createWorkspaceFixture(): { workspaceRoot: string; nestedCwd: string } {
@@ -92,4 +194,16 @@ function createWorkspaceFixture(): { workspaceRoot: string; nestedCwd: string } 
   mkdirSync(nestedCwd, { recursive: true });
 
   return { workspaceRoot, nestedCwd };
+}
+
+function installLocalTandemExtensionMarker(workspaceRoot: string): void {
+  const extensionPath = path.join(workspaceRoot, '.gsd', 'extensions', 'tandem-review.mjs');
+  mkdirSync(path.dirname(extensionPath), { recursive: true });
+  writeFileSync(extensionPath, 'export default {};\n', 'utf8');
+}
+
+function installLocalTandemBrokerDb(workspaceRoot: string): void {
+  const dbPath = path.join(workspaceRoot, '.gsd', 'review-broker', 'broker.db');
+  mkdirSync(path.dirname(dbPath), { recursive: true });
+  writeFileSync(dbPath, '', 'utf8');
 }
