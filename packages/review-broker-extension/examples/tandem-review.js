@@ -8,18 +8,20 @@
  *   1. The review-broker-extension and review-broker-client packages installed
  *   2. `tandem` and `gsd` commands available on PATH for pooled reviewer workers
  *
- * Workflow (Fix 1 — worktree-diff model):
- *   - Agents do NOT commit during a unit. Leave changes uncommitted in the
- *     worktree.
- *   - The before_next_dispatch hook submits `git diff HEAD` to the broker.
- *   - On approval, the broker transport runs `git add -A && git commit -m ...`
- *     so each approved unit lands as one commit attributed to the agent.
+ * Workflow:
+ *   - GSD owns proposer commits. In the default auto-mode flow, the unit is
+ *     committed before this review gate runs.
+ *   - The before_next_dispatch hook submits the latest committed unit diff to
+ *     the broker. If a worktree-only flow is used, it can still submit dirty
+ *     worktree changes, but the review transport will not commit them.
+ *   - On approval, the proposer moves on. The reviewer never commits.
  *   - On a "changes_requested" verdict, both policies retry the same unit and
  *     keep the same reviewId. The difference is guidance mode:
  *       - `intervene` injects explicit user-guidance instructions before remediation.
  *       - `auto-loop` remediates directly from reviewer guidance.
- *   - After a revision is submitted, the review moves back to pending/claimed
- *     on the same review id while waiting for the next verdict.
+ *   - Feedback remediation lands as additional proposer commits. The updated
+ *     proposal diff replaces the stale proposal on the same review id while
+ *     waiting for the next verdict.
  *   - By default, review state is stored in the global Tandem broker database.
  *     Set TANDEM_BROKER_DB=.gsd/review-broker/broker.db to opt into a
  *     project-local database.

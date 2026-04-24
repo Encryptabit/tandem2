@@ -2,7 +2,7 @@ import type { AutoSession, VerificationRetryContext } from './session.js';
 import { createAutoSession } from './session.js';
 import { readPausedReviewGateState, writePausedReviewGateState } from './pause-state.js';
 import { finalizeReviewForUnit } from './finalize.js';
-import { handleReviewSubmit, handleReviewStatus } from './commands.js';
+import { handleReviewSubmit, openReviewPanel } from './commands.js';
 import { formatPendingRetryPrompt } from './verification.js';
 import type {
   ResolvedBlockedReviewPolicy,
@@ -54,6 +54,10 @@ interface ExtensionAPI {
     handler: (event: any, ctx: any) => Promise<HookResult | BeforeAgentStartResult | void> | HookResult | BeforeAgentStartResult | void,
   ): void;
   registerCommand(name: string, options: { description?: string; handler: (args: string, ctx: any) => Promise<void> }): void;
+  registerShortcut?(
+    key: string,
+    options: { description?: string; handler: (ctx: any) => Promise<void> | void },
+  ): void;
 }
 
 const ACTION_MAP: Record<string, HookResult['action']> = {
@@ -67,6 +71,10 @@ const DEFAULT_RETRY_ATTEMPT = 1;
 const MAX_REASON_LENGTH = 220;
 const DEFAULT_REVIEW_WAIT_TIMEOUT_MS = 10 * 60 * 1000;
 const DEFAULT_REVIEW_WAIT_POLL_INTERVAL_MS = 2 * 1000;
+const REVIEW_SHORTCUTS = [
+  { key: 'ctrl+alt+r', fallback: false },
+  { key: 'ctrl+shift+r', fallback: true },
+] as const;
 
 function truncate(value: string, maxLength = MAX_REASON_LENGTH): string {
   if (value.length <= maxLength) return value;
@@ -291,7 +299,11 @@ export function createTandemReviewExtension(config: TandemReviewConfig) {
         }
       }
 
-      if (outcome.action === 'pause') {
+      if (
+        outcome.action === 'pause' ||
+        outcome.action === 'retry-unit' ||
+        (outcome.action === 'progress' && outcome.reason === 'review-allowed')
+      ) {
         await writePausedReviewGateState(projectRoot, currentSession.reviewGateState, outcome.reason);
       }
 
@@ -323,28 +335,53 @@ export function createTandemReviewExtension(config: TandemReviewConfig) {
     });
 
     pi.registerCommand('review', {
-      description: 'Submit or check status of a broker review',
-      handler: async (args: string): Promise<void> => {
+      description: 'Open Tandem review status or submit the current unit for review',
+      handler: async (args: string, ctx: unknown): Promise<void> => {
         const subcommand = args.trim().split(/\s+/)[0] ?? 'status';
 
-        let result: string;
         if (subcommand === 'submit') {
-          result = await handleReviewSubmit({
+          const result = await handleReviewSubmit({
             session,
             projectRoot,
             transport,
           });
-        } else {
-          result = await handleReviewStatus({
+
+          await openReviewPanel({
+            ctx,
             session,
             projectRoot,
             transport,
+            fallbackText: result,
           });
+          return;
         }
 
-        console.log(result);
+        await openReviewPanel({
+          ctx,
+          session,
+          projectRoot,
+          transport,
+        });
       },
     });
+
+    if (typeof pi.registerShortcut === 'function') {
+      const openReviewPanelFromShortcut = async (ctx: unknown): Promise<void> => {
+        await openReviewPanel({
+          ctx,
+          session,
+          projectRoot,
+          transport,
+        });
+      };
+
+      for (const shortcut of REVIEW_SHORTCUTS) {
+        pi.registerShortcut(shortcut.key, {
+          description: `Open Tandem review status${shortcut.fallback ? ' (fallback)' : ''} (/review status)`,
+          handler: openReviewPanelFromShortcut,
+        });
+      }
+    }
   };
 }
 

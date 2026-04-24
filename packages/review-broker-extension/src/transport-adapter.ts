@@ -1,9 +1,14 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import type { BrokerClient } from 'review-broker-client';
-import type { ReviewStatus as BrokerReviewStatus, ReviewSummary, ReviewVerdict } from 'review-broker-core';
+import type {
+  ReviewDiscussionMessage,
+  ReviewStatus as BrokerReviewStatus,
+  ReviewSummary,
+  ReviewVerdict,
+} from 'review-broker-core';
 import type {
   ReviewStatusRecord,
   ReviewTransport,
@@ -57,15 +62,21 @@ interface ReviewPatchSelection {
   selectedPaths: string[];
   expectedPaths: string[];
   statusByPath: Map<string, string>;
+  source: 'worktree' | 'commit-range';
+  baseRef?: string;
+  headRef?: string;
 }
+
+const EMPTY_TREE_REF = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
+const DEFAULT_RECENT_REVIEW_SCAN_LIMIT = 100;
 
 export interface TransportAdapterConfig {
   client: BrokerClient;
   cwd: string;
   authorId: string;
   /**
-   * Override the commit message used when committing the worktree on review approval.
-   * Defaults to `tandem-review: <unit title> (<reviewId>)`.
+   * @deprecated The default GSD flow commits unit work before review. The
+   * transport no longer commits on approval, so this option is ignored.
    */
   commitMessage?: (unit: ReviewUnitIdentity, reviewId: string) => string;
 }
@@ -191,7 +202,20 @@ function normalizePath(value: string): string {
   return value.replace(/\\/g, '/');
 }
 
+function normalizeWorkspaceRoot(value: string): string {
+  const normalized = normalizePath(resolve(value));
+  return normalized.startsWith('/mnt/') ? normalized.toLowerCase() : normalized;
+}
+
+function isSameWorkspaceRoot(left: string | null, right: string): boolean {
+  return left !== null && normalizeWorkspaceRoot(left) === normalizeWorkspaceRoot(right);
+}
+
 function isTransientGsdPath(path: string): boolean {
+  if (path === '.gsd') {
+    return true;
+  }
+
   if (!path.startsWith('.gsd/')) {
     return false;
   }
@@ -264,15 +288,55 @@ function ensureExpectedArtifactsOnDisk(cwd: string, expectedPaths: string[]): vo
   }
 }
 
-function ensureExpectedArtifactsChanged(expectedPaths: string[], changedPathSet: Set<string>): void {
-  for (const artifactPath of expectedPaths) {
-    if (!changedPathSet.has(artifactPath)) {
-      throw new Error(`review_patch_expected_artifact_not_changed:${artifactPath}`);
-    }
+function isReviewableChangedPath(path: string): boolean {
+  if (isTransientGsdPath(path)) {
+    return false;
+  }
+
+  if (path.startsWith('.gsd/')) {
+    return isDurableGsdPath(path);
+  }
+
+  return true;
+}
+
+async function getHeadCommit(cwd: string): Promise<string> {
+  const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
+    cwd,
+    maxBuffer: GIT_MAX_BUFFER,
+  });
+  return stdout.trim();
+}
+
+async function getCommitBase(cwd: string, headRef: string): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync('git', ['rev-parse', `${headRef}^`], {
+      cwd,
+      maxBuffer: GIT_MAX_BUFFER,
+    });
+    return stdout.trim();
+  } catch {
+    return EMPTY_TREE_REF;
   }
 }
 
-async function selectReviewPatchPaths(cwd: string, unit: ReviewUnitIdentity): Promise<ReviewPatchSelection> {
+async function listChangedPathsInCommitRange(cwd: string, baseRef: string, headRef: string): Promise<string[]> {
+  const { stdout } = await execFileAsync(
+    'git',
+    ['-c', 'core.quotepath=false', 'diff', '--name-only', '-z', baseRef, headRef, '--'],
+    { cwd, maxBuffer: GIT_MAX_BUFFER },
+  );
+
+  return stdout
+    .split('\0')
+    .map((entry) => normalizePath(entry.trim()))
+    .filter((entry) => entry.length > 0);
+}
+
+async function selectWorktreeReviewPatchPaths(
+  cwd: string,
+  expectedPaths: string[],
+): Promise<ReviewPatchSelection | null> {
   const changedEntries = await listChangedPathEntries(cwd);
   const statusByPath = new Map<string, string>();
 
@@ -281,37 +345,68 @@ async function selectReviewPatchPaths(cwd: string, unit: ReviewUnitIdentity): Pr
   }
 
   const changedPathSet = new Set(statusByPath.keys());
-  const expectedPaths = resolveExpectedArtifactPaths(unit);
-
-  ensureExpectedArtifactsOnDisk(cwd, expectedPaths);
-  ensureExpectedArtifactsChanged(expectedPaths, changedPathSet);
-
-  const selected = new Set<string>(expectedPaths);
+  const selected = new Set<string>();
 
   for (const changedPath of changedPathSet) {
-    if (isTransientGsdPath(changedPath)) {
-      continue;
-    }
-
-    if (changedPath.startsWith('.gsd/')) {
-      if (isDurableGsdPath(changedPath)) {
-        selected.add(changedPath);
-      }
-      continue;
-    }
-
-    selected.add(changedPath);
+    if (isReviewableChangedPath(changedPath)) selected.add(changedPath);
   }
 
   if (selected.size === 0) {
-    throw new Error('review_patch_no_reviewable_changes');
+    return null;
   }
 
   return {
     selectedPaths: [...selected].sort((left, right) => left.localeCompare(right)),
     expectedPaths,
     statusByPath,
+    source: 'worktree',
   };
+}
+
+async function selectCommitRangeReviewPatchPaths(
+  cwd: string,
+  expectedPaths: string[],
+  baseRef?: string,
+): Promise<ReviewPatchSelection | null> {
+  const headRef = await getHeadCommit(cwd);
+  const resolvedBaseRef = baseRef ?? (await getCommitBase(cwd, headRef));
+  const selectedPaths = (await listChangedPathsInCommitRange(cwd, resolvedBaseRef, headRef))
+    .filter(isReviewableChangedPath)
+    .sort((left, right) => left.localeCompare(right));
+
+  if (selectedPaths.length === 0) {
+    return null;
+  }
+
+  return {
+    selectedPaths,
+    expectedPaths,
+    statusByPath: new Map(),
+    source: 'commit-range',
+    baseRef: resolvedBaseRef,
+    headRef,
+  };
+}
+
+async function selectReviewPatchPaths(
+  cwd: string,
+  unit: ReviewUnitIdentity,
+  options: { baseRef?: string } = {},
+): Promise<ReviewPatchSelection> {
+  const expectedPaths = resolveExpectedArtifactPaths(unit);
+  ensureExpectedArtifactsOnDisk(cwd, expectedPaths);
+
+  const worktreeSelection = await selectWorktreeReviewPatchPaths(cwd, expectedPaths);
+  if (worktreeSelection) {
+    return worktreeSelection;
+  }
+
+  const commitSelection = await selectCommitRangeReviewPatchPaths(cwd, expectedPaths, options.baseRef);
+  if (commitSelection) {
+    return commitSelection;
+  }
+
+  throw new Error('review_patch_no_reviewable_changes');
 }
 
 async function generateTrackedDiff(cwd: string, trackedPaths: string[]): Promise<string> {
@@ -348,6 +443,24 @@ async function generateUntrackedDiff(cwd: string, untrackedPath: string): Promis
 }
 
 async function buildReviewDiff(cwd: string, selection: ReviewPatchSelection): Promise<string> {
+  if (selection.source === 'commit-range') {
+    if (!selection.baseRef || !selection.headRef) {
+      throw new Error('review_patch_commit_range_missing');
+    }
+
+    const { stdout } = await execFileAsync(
+      'git',
+      ['diff', '--binary', selection.baseRef, selection.headRef, '--', ...selection.selectedPaths],
+      { cwd, maxBuffer: GIT_MAX_BUFFER },
+    );
+
+    if (stdout.trim().length === 0) {
+      throw new Error('review_patch_empty');
+    }
+
+    return stdout.endsWith('\n') ? stdout : `${stdout}\n`;
+  }
+
   const trackedPaths = selection.selectedPaths.filter(
     (path) => selection.statusByPath.get(path) !== '??',
   );
@@ -380,46 +493,6 @@ async function buildReviewDiff(cwd: string, selection: ReviewPatchSelection): Pr
   return combined.endsWith('\n') ? combined : `${combined}\n`;
 }
 
-async function stagePaths(cwd: string, paths: string[]): Promise<void> {
-  if (paths.length === 0) {
-    return;
-  }
-
-  await execFileAsync('git', ['add', '--', ...paths], { cwd, maxBuffer: GIT_MAX_BUFFER });
-}
-
-async function hasStagedChanges(cwd: string, paths: string[]): Promise<boolean> {
-  if (paths.length === 0) {
-    return false;
-  }
-
-  const { stdout } = await execFileAsync(
-    'git',
-    ['diff', '--cached', '--name-only', '--', ...paths],
-    { cwd, maxBuffer: GIT_MAX_BUFFER },
-  );
-
-  return stdout.trim().length > 0;
-}
-
-async function commitPaths(cwd: string, paths: string[], message: string): Promise<void> {
-  if (paths.length === 0) {
-    return;
-  }
-
-  await stagePaths(cwd, paths);
-
-  if (!(await hasStagedChanges(cwd, paths))) {
-    return;
-  }
-
-  await execFileAsync(
-    'git',
-    ['commit', '-m', message, '--', ...paths],
-    { cwd, maxBuffer: GIT_MAX_BUFFER },
-  );
-}
-
 function toStatusRecord(review: ReviewSummary): ReviewStatusRecord {
   const record: ReviewStatusRecord = {
     reviewId: review.reviewId,
@@ -449,10 +522,7 @@ function findLatestReviewerFeedback(messages: Array<{ authorRole: string; body: 
 }
 
 export function createBrokerTransportAdapter(config: TransportAdapterConfig): ReviewTransport {
-  const buildCommitMessage =
-    config.commitMessage ?? ((unit, reviewId) => `tandem-review: ${formatUnitTitle(unit)} (${reviewId})`);
-
-  const reviewPatchPaths = new Map<string, string[]>();
+  const reviewBaseRefs = new Map<string, string>();
 
   return {
     async submitReview(unit: ReviewUnitIdentity): Promise<ReviewStatusRecord> {
@@ -474,13 +544,18 @@ export function createBrokerTransportAdapter(config: TransportAdapterConfig): Re
         priority: 'normal',
       });
 
-      reviewPatchPaths.set(response.review.reviewId, selectedPaths.selectedPaths);
+      if (selectedPaths.baseRef) {
+        reviewBaseRefs.set(response.review.reviewId, selectedPaths.baseRef);
+      }
 
       return toStatusRecord(response.review);
     },
 
     async submitCounterPatch(input: SubmitCounterPatchInput): Promise<ReviewStatusRecord> {
-      const selection = await selectReviewPatchPaths(config.cwd, input.unit);
+      const rememberedBaseRef = reviewBaseRefs.get(input.reviewId);
+      const selection = await selectReviewPatchPaths(config.cwd, input.unit, {
+        ...(rememberedBaseRef !== undefined ? { baseRef: rememberedBaseRef } : {}),
+      });
       const diff = await buildReviewDiff(config.cwd, selection);
       const body = buildCounterPatchMessage({
         reviewId: input.reviewId,
@@ -496,7 +571,9 @@ export function createBrokerTransportAdapter(config: TransportAdapterConfig): Re
         diff,
       });
 
-      reviewPatchPaths.set(input.reviewId, selection.selectedPaths);
+      if (selection.baseRef) {
+        reviewBaseRefs.set(input.reviewId, selection.baseRef);
+      }
 
       const record = toStatusRecord(response.review);
       if (!record.summary) {
@@ -527,27 +604,22 @@ export function createBrokerTransportAdapter(config: TransportAdapterConfig): Re
       return record;
     },
 
+    async getReviewDiscussion(reviewId: string): Promise<ReviewDiscussionMessage[]> {
+      const response = await config.client.getDiscussion({ reviewId });
+      return response.messages;
+    },
+
+    async listRecentReviews(input: { projectRoot: string; limit?: number }): Promise<ReviewSummary[]> {
+      const requestedLimit = input.limit ?? 8;
+      const response = await config.client.listReviews({ limit: DEFAULT_RECENT_REVIEW_SCAN_LIMIT });
+      return response.reviews
+        .filter((review) => isSameWorkspaceRoot(review.workspaceRoot, input.projectRoot))
+        .slice(0, requestedLimit);
+    },
+
     async onReviewAllowed(unit: ReviewUnitIdentity, reviewId: string): Promise<void> {
-      let selectedPaths = reviewPatchPaths.get(reviewId);
-
-      if (!selectedPaths) {
-        try {
-          selectedPaths = (await selectReviewPatchPaths(config.cwd, unit)).selectedPaths;
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          if (message === 'review_patch_no_reviewable_changes') {
-            return;
-          }
-          throw error;
-        }
-      }
-
-      if (selectedPaths.length === 0) {
-        return;
-      }
-
-      await commitPaths(config.cwd, selectedPaths, buildCommitMessage(unit, reviewId));
-      reviewPatchPaths.delete(reviewId);
+      void unit;
+      reviewBaseRefs.delete(reviewId);
     },
   };
 }

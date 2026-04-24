@@ -1,3 +1,5 @@
+import type { ReviewDiscussionMessage, ReviewSummary } from 'review-broker-core';
+
 export type ReviewMode = 'auto' | 'human';
 export type ReviewPhase = 'idle' | 'submitting' | 'waiting' | 'completed' | 'error';
 export type ReviewStatus = 'pending' | 'claimed' | 'approved' | 'changes_requested' | 'failed';
@@ -44,6 +46,12 @@ export interface ReviewTransport {
   submitReview(unit: ReviewUnitIdentity): Promise<ReviewStatusRecord>;
   submitCounterPatch?(input: SubmitCounterPatchInput): Promise<ReviewStatusRecord>;
   getStatus(reviewId: string): Promise<ReviewStatusRecord>;
+  getReviewDiscussion?(reviewId: string): Promise<ReviewDiscussionMessage[]>;
+  listRecentReviews?(input: { projectRoot: string; limit?: number }): Promise<ReviewSummary[]>;
+  /**
+   * Optional approval cleanup hook. The default broker transport does not
+   * commit here; GSD/proposer execution owns commits before review submission.
+   */
   onReviewAllowed?(unit: ReviewUnitIdentity, reviewId: string): Promise<void>;
 }
 
