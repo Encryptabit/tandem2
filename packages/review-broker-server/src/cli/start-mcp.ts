@@ -26,6 +26,7 @@ async function main(): Promise<void> {
       ...(options.dbPath !== undefined ? { dbPath: options.dbPath } : {}),
       ...(options.busyTimeoutMs !== undefined ? { busyTimeoutMs: options.busyTimeoutMs } : {}),
       enablePool: false,
+      enableStartupRecovery: false,
     });
     const server = createBrokerMcpServer({ service: runtime.service });
     const transport = new StdioServerTransport();

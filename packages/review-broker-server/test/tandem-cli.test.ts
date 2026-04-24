@@ -26,6 +26,14 @@ function runTandem(args: string[]): ReturnType<typeof spawnSync> {
   });
 }
 
+function runTandemWithEnv(args: string[], env: NodeJS.ProcessEnv): ReturnType<typeof spawnSync> {
+  return spawnSync(TSX_PATH, [TANDEM_CLI_PATH, ...args], {
+    cwd: WORKTREE_ROOT,
+    encoding: 'utf8',
+    env: { ...process.env, ...env },
+  });
+}
+
 /**
  * Parse the JSON output from a tandem --json command.
  * The CLI writes a single pretty-printed JSON object to stdout.
@@ -194,6 +202,86 @@ describe('tandem CLI smoke tests', () => {
       expect(stdout).toMatch(/Reviews:/i);
       expect(stdout).toMatch(/Reviewers:/i);
       expect(stdout).toMatch(/Messages:/i);
+    });
+
+    it('does not run pool scaling or startup recovery for short-lived status commands', () => {
+      const directory = mkdtempSync(path.join(os.tmpdir(), 'tandem-cli-no-pool-'));
+      const localDbPath = path.join(directory, 'broker.sqlite');
+      const configPath = path.join(directory, 'review-broker-config.json');
+      writeFileSync(
+        configPath,
+        JSON.stringify(
+          {
+            reviewer_pool: {
+              max_pool_size: 3,
+              scaling_ratio: 1,
+              idle_timeout_seconds: 300,
+              max_ttl_seconds: 3600,
+              claim_timeout_seconds: 300,
+              spawn_cooldown_seconds: 1,
+              background_check_interval_seconds: 5,
+            },
+            reviewer: {
+              provider: 'fixture',
+              providers: {
+                fixture: {
+                  command: process.execPath,
+                  args: [path.join(WORKTREE_ROOT, 'packages', 'review-broker-server', 'test', 'fixtures', 'reviewer-worker.mjs')],
+                },
+              },
+            },
+          },
+          null,
+          2,
+        ) + '\n',
+      );
+
+      const context = createAppContext({
+        cwd: WORKTREE_ROOT,
+        dbPath: localDbPath,
+      });
+      try {
+        const now = '2026-04-24T12:00:00.000Z';
+        context.reviewers.recordSpawned({
+          reviewerId: 'live-cli-reviewer',
+          command: process.execPath,
+          args: ['fixture-worker.mjs'],
+          pid: 12345,
+          startedAt: now,
+          lastSeenAt: now,
+          sessionToken: 'existing-dashboard-session',
+          createdAt: now,
+          updatedAt: now,
+        });
+      } finally {
+        context.close();
+      }
+
+      const result = runTandemWithEnv(['status', '--json', '--db-path', localDbPath], {
+        REVIEW_BROKER_CONFIG_PATH: configPath,
+      });
+
+      expect(result.status).toBe(0);
+
+      const verification = createAppContext({
+        cwd: WORKTREE_ROOT,
+        dbPath: localDbPath,
+      });
+      try {
+        expect(verification.reviewers.getById('live-cli-reviewer')).toMatchObject({
+          pid: 12345,
+          offlineAt: null,
+        });
+        const lifecycleEvents = verification.db
+          .prepare<unknown[], { event_type: string }>(
+            `SELECT event_type FROM audit_events WHERE event_type IN ('reviewer.offline', 'pool.scale_up')`,
+          )
+          .all();
+        expect(lifecycleEvents).toHaveLength(0);
+      } finally {
+        verification.close();
+        rmSync(directory, { recursive: true, force: true });
+      }
     });
   });
 

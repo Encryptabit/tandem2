@@ -1390,11 +1390,14 @@ async function main(): Promise<void> {
   let runtime: StartedBrokerRuntime | undefined;
 
   try {
+    const isLongLivedBrokerCommand = noun === 'dashboard';
     runtime = startBroker({
       handleSignals: false,
       ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
       ...(options.dbPath !== undefined ? { dbPath: options.dbPath } : {}),
       ...(noun === 'dashboard' ? { preferLocalExtensionDb: true } : {}),
+      enablePool: isLongLivedBrokerCommand,
+      enableStartupRecovery: isLongLivedBrokerCommand,
     });
 
     await dispatch(noun, verb, subcommandRest, runtime, options);

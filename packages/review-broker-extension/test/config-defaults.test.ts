@@ -49,8 +49,8 @@ describe('ensureReviewBrokerConfigDefaults', () => {
       max_pool_size: 3,
       scaling_ratio: 1,
       idle_timeout_seconds: 300,
-      max_ttl_seconds: 600,
-      claim_timeout_seconds: 300,
+      max_ttl_seconds: 3600,
+      claim_timeout_seconds: 1800,
       spawn_cooldown_seconds: 5,
       background_check_interval_seconds: 10,
     });
@@ -167,5 +167,50 @@ describe('ensureReviewBrokerConfigDefaults', () => {
     expect(parsed.reviewer_pool.max_pool_size).toBe(2);
     expect(parsed.reviewer_pool.scaling_ratio).toBe(1);
     expect(parsed.reviewer_pool.background_check_interval_seconds).toBe(10);
+  });
+
+  it('upgrades legacy pool timeout defaults but preserves custom values', () => {
+    const root = makeTempDir();
+    const configPath = path.join(root, '.gsd', 'review-broker', 'config.json');
+    mkdirSync(path.dirname(configPath), { recursive: true });
+
+    writeFileSync(
+      configPath,
+      JSON.stringify(
+        {
+          reviewer: {
+            provider: 'codex',
+            providers: {
+              codex: {
+                command: 'node',
+                args: ['/tmp/reviewer-worker.mjs'],
+              },
+            },
+          },
+          reviewer_pool: {
+            max_pool_size: 2,
+            max_ttl_seconds: 600,
+            claim_timeout_seconds: 300,
+            idle_timeout_seconds: 900,
+          },
+        },
+        null,
+        2,
+      ) + '\n',
+      'utf8',
+    );
+
+    const result = ensureReviewBrokerConfigDefaults({
+      projectRoot: root,
+      workerCommand: 'node',
+      workerScriptPath: '/tmp/reviewer-worker.mjs',
+    });
+
+    expect(result.updated).toBe(true);
+
+    const parsed = JSON.parse(readFileSync(configPath, 'utf8'));
+    expect(parsed.reviewer_pool.max_ttl_seconds).toBe(3600);
+    expect(parsed.reviewer_pool.claim_timeout_seconds).toBe(1800);
+    expect(parsed.reviewer_pool.idle_timeout_seconds).toBe(900);
   });
 });

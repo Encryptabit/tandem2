@@ -350,6 +350,10 @@ export function createPoolManager(options: CreatePoolManagerOptions): PoolManage
 
       const claimAge = (Date.parse(now) - Date.parse(review.claimedAt)) / 1000;
       if (claimAge > poolConfig.claim_timeout_seconds) {
+        if (review.claimedBy && reviewerManager.isProcessAlive(review.claimedBy)) {
+          continue;
+        }
+
         const result = reviews.updateState({
           reviewId: review.reviewId,
           status: 'pending',
