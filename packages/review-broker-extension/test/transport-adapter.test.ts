@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -140,10 +140,12 @@ afterEach(() => {
   }
 });
 
-describe('createBrokerTransportAdapter (Fix 1: worktree diff + commit-on-approval)', () => {
-  it('submits a worktree diff (uncommitted changes against HEAD)', async () => {
+describe('createBrokerTransportAdapter (committed proposal diff model)', () => {
+  it('submits the latest committed diff when the worktree is clean', async () => {
     const cwd = await createGitRepo();
     writeFileSync(path.join(cwd, 'src', 'sample.txt'), 'baseline\nadded line\n');
+    await git(cwd, ['add', '-A']);
+    await git(cwd, ['commit', '-m', 'complete unit']);
 
     const capture: { diff?: string; title?: string } = {};
     const transport = createBrokerTransportAdapter({
@@ -160,9 +162,31 @@ describe('createBrokerTransportAdapter (Fix 1: worktree diff + commit-on-approva
     expect(capture.diff).toContain('src/sample.txt');
     expect(capture.title).toBe('Review: M01/T01');
 
-    // The worktree must remain dirty at submit time — the commit happens later in onReviewAllowed.
     const status = await git(cwd, ['status', '--porcelain']);
-    expect(status.trim().length).toBeGreaterThan(0);
+    expect(status.trim()).toBe('');
+  });
+
+  it('still supports uncommitted worktree diffs without committing on approval', async () => {
+    const cwd = await createGitRepo();
+    writeFileSync(path.join(cwd, 'src', 'sample.txt'), 'baseline\nuncommitted line\n');
+
+    const capture: { diff?: string } = {};
+    const transport = createBrokerTransportAdapter({
+      client: fakeBrokerClient({ capture }),
+      cwd,
+      authorId: 'tester',
+    });
+
+    await transport.submitReview({ unitId: 'U-1', milestoneId: 'M01', taskId: 'T01' });
+    expect(capture.diff).toContain('+uncommitted line');
+
+    const headBefore = (await git(cwd, ['rev-parse', 'HEAD'])).trim();
+    await transport.onReviewAllowed!({ unitId: 'U-1', milestoneId: 'M01', taskId: 'T01' }, 'rvw_test_1');
+    const headAfter = (await git(cwd, ['rev-parse', 'HEAD'])).trim();
+    const status = await git(cwd, ['status', '--porcelain']);
+
+    expect(headAfter).toBe(headBefore);
+    expect(status).toContain('src/sample.txt');
   });
 
   it('fails closed when expected unit artifacts are missing from disk', async () => {
@@ -183,6 +207,44 @@ describe('createBrokerTransportAdapter (Fix 1: worktree diff + commit-on-approva
         sliceId: 'S03',
       }),
     ).rejects.toThrow(/review_patch_missing_expected_artifact/);
+  });
+
+  it('does not require expected artifacts under a .gsd symlink to be changed in git', async () => {
+    const cwd = await createGitRepo();
+    const externalGsdRoot = mkdtempSync(path.join(os.tmpdir(), 'tandem-gsd-state-'));
+    tmpDirs.push(externalGsdRoot);
+    await mkdir(path.join(externalGsdRoot, 'milestones', 'M001', 'slices', 'S03', 'tasks'), { recursive: true });
+    writeFileSync(
+      path.join(externalGsdRoot, 'milestones', 'M001', 'slices', 'S03', 'tasks', 'T01-SUMMARY.md'),
+      '# T01 summary\n',
+    );
+    writeFileSync(path.join(cwd, '.gitignore'), '.gsd\n');
+    await git(cwd, ['add', '.gitignore']);
+    await git(cwd, ['commit', '-m', 'ignore gsd state']);
+    symlinkSync(externalGsdRoot, path.join(cwd, '.gsd'), 'dir');
+
+    writeFileSync(path.join(cwd, 'src', 'sample.txt'), 'baseline\ncommitted unit change\n');
+    await git(cwd, ['add', '-A']);
+    await git(cwd, ['commit', '-m', 'complete symlinked gsd unit']);
+
+    const capture: { diff?: string } = {};
+    const transport = createBrokerTransportAdapter({
+      client: fakeBrokerClient({ capture }),
+      cwd,
+      authorId: 'tester',
+    });
+
+    await transport.submitReview({
+      unitId: 'M001/S03/T01',
+      unitType: 'execute-task',
+      milestoneId: 'M001',
+      sliceId: 'S03',
+      taskId: 'T01',
+    });
+
+    expect(capture.diff).toContain('src/sample.txt');
+    expect(capture.diff).toContain('+committed unit change');
+    expect(capture.diff).not.toContain('.gsd/milestones/M001/slices/S03/tasks/T01-SUMMARY.md');
   });
 
   it('includes expected durable artifacts and excludes transient .gsd runtime logs', async () => {
@@ -347,7 +409,7 @@ describe('createBrokerTransportAdapter (Fix 1: worktree diff + commit-on-approva
     expect(status.feedback).toBe('Rename `WidgetCount` to `TodoCount`.');
   });
 
-  it('onReviewAllowed commits the worktree with reviewId in the message', async () => {
+  it('onReviewAllowed does not commit because GSD owns proposer commits', async () => {
     const cwd = await createGitRepo();
     writeFileSync(path.join(cwd, 'src', 'sample.txt'), 'baseline\napproved change\n');
 
@@ -362,33 +424,27 @@ describe('createBrokerTransportAdapter (Fix 1: worktree diff + commit-on-approva
     await transport.onReviewAllowed!({ unitId: 'U-2', milestoneId: 'M01', taskId: 'T02' }, 'rvw_xyz');
 
     const headAfter = (await git(cwd, ['rev-parse', 'HEAD'])).trim();
-    expect(headAfter).not.toBe(headBefore);
+    expect(headAfter).toBe(headBefore);
 
     const status = await git(cwd, ['status', '--porcelain']);
-    expect(status.trim()).toBe('');
-
-    const message = (await git(cwd, ['log', '-1', '--pretty=%B'])).trim();
-    expect(message).toBe('tandem-review: Review: M01/T02 (rvw_xyz)');
+    expect(status).toContain('src/sample.txt');
   });
 
-  it('onReviewAllowed commits only the reviewed path set and leaves transient runtime churn unstaged', async () => {
+  it('resubmitted committed counter-patches keep the original base and replace the proposal diff', async () => {
     const cwd = await createGitRepo();
 
-    await mkdir(path.join(cwd, '.gsd', 'audit'), { recursive: true });
     await mkdir(path.join(cwd, '.gsd', 'milestones', 'M001', 'slices', 'S03'), { recursive: true });
-
-    writeFileSync(path.join(cwd, '.gsd', 'audit', 'events.jsonl'), 'tracked baseline\n');
-    await git(cwd, ['add', '-A']);
-    await git(cwd, ['commit', '-m', 'track-audit-log']);
-
-    writeFileSync(path.join(cwd, '.gsd', 'audit', 'events.jsonl'), 'tracked baseline\nnoise\n');
     writeFileSync(
       path.join(cwd, '.gsd', 'milestones', 'M001', 'slices', 'S03', 'S03-PLAN.md'),
       '# Planned\n\n- [ ] **T01: Example** `est:20m`\n',
     );
+    writeFileSync(path.join(cwd, 'src', 'sample.txt'), 'baseline\noriginal proposal\n');
+    await git(cwd, ['add', '-A']);
+    await git(cwd, ['commit', '-m', 'complete initial unit']);
 
+    const capture: { diff?: string; counterPatchDiff?: string } = {};
     const transport = createBrokerTransportAdapter({
-      client: fakeBrokerClient(),
+      client: fakeBrokerClient({ capture }),
       cwd,
       authorId: 'tester',
     });
@@ -400,41 +456,62 @@ describe('createBrokerTransportAdapter (Fix 1: worktree diff + commit-on-approva
       sliceId: 'S03',
     });
 
-    await transport.onReviewAllowed!({
-      unitId: 'M001/S03',
-      unitType: 'plan-slice',
-      milestoneId: 'M001',
-      sliceId: 'S03',
-    }, 'rvw_test_1');
+    expect(capture.diff).toContain('+original proposal');
 
-    const committedFiles = (await git(cwd, ['show', '--name-only', '--pretty=format:', 'HEAD']))
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean);
+    writeFileSync(
+      path.join(cwd, '.gsd', 'milestones', 'M001', 'slices', 'S03', 'S03-PLAN.md'),
+      '# Planned\n\n- [x] **T01: Example** `est:20m`\n',
+    );
+    writeFileSync(path.join(cwd, 'src', 'sample.txt'), 'baseline\noriginal proposal\nreview feedback fix\n');
+    await git(cwd, ['add', '-A']);
+    await git(cwd, ['commit', '-m', 'address reviewer feedback']);
 
-    expect(committedFiles).toContain('.gsd/milestones/M001/slices/S03/S03-PLAN.md');
-    expect(committedFiles).not.toContain('.gsd/audit/events.jsonl');
+    await transport.submitCounterPatch!({
+      reviewId: 'rvw_test_1',
+      feedback: 'Mark the task complete and add the missing fix.',
+      unit: {
+        unitId: 'M001/S03',
+        unitType: 'plan-slice',
+        milestoneId: 'M001',
+        sliceId: 'S03',
+      },
+    });
 
-    const status = await git(cwd, ['status', '--porcelain']);
-    expect(status).toContain('.gsd/audit/events.jsonl');
+    expect(capture.counterPatchDiff).toContain('+original proposal');
+    expect(capture.counterPatchDiff).toContain('+review feedback fix');
+    expect(capture.counterPatchDiff).toContain('+- [x] **T01: Example**');
   });
 
-  it('onReviewAllowed is a no-op when the worktree has no changes', async () => {
+  it('onReviewAllowed clears remembered review base without creating commits', async () => {
     const cwd = await createGitRepo();
+    writeFileSync(path.join(cwd, 'src', 'sample.txt'), 'baseline\nfirst committed change\n');
+    await git(cwd, ['add', '-A']);
+    await git(cwd, ['commit', '-m', 'complete unit']);
+
     const transport = createBrokerTransportAdapter({
       client: fakeBrokerClient(),
       cwd,
       authorId: 'tester',
     });
 
+    await transport.submitReview({
+      unitId: 'U-3',
+      milestoneId: 'M01',
+      taskId: 'T03',
+    });
+
     const headBefore = (await git(cwd, ['rev-parse', 'HEAD'])).trim();
-    await transport.onReviewAllowed!({ unitId: 'U-3' }, 'rvw_noop');
+    await transport.onReviewAllowed!({
+      unitId: 'M001/S03',
+      milestoneId: 'M01',
+      taskId: 'T03',
+    }, 'rvw_test_1');
     const headAfter = (await git(cwd, ['rev-parse', 'HEAD'])).trim();
 
     expect(headAfter).toBe(headBefore);
   });
 
-  it('honours a custom commitMessage builder', async () => {
+  it('ignores the deprecated custom commitMessage builder', async () => {
     const cwd = await createGitRepo();
     writeFileSync(path.join(cwd, 'src', 'sample.txt'), 'baseline\ncustom\n');
 
@@ -448,6 +525,6 @@ describe('createBrokerTransportAdapter (Fix 1: worktree diff + commit-on-approva
     await transport.onReviewAllowed!({ unitId: 'U-4', taskId: 'T04' }, 'rvw_custom');
 
     const message = (await git(cwd, ['log', '-1', '--pretty=%B'])).trim();
-    expect(message).toBe('chore(T04): approved as rvw_custom');
+    expect(message).toBe('baseline');
   });
 });

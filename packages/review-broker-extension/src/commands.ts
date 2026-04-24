@@ -1,6 +1,7 @@
 import type { AutoSession } from './session.js';
 import { readReviewStatus, submitReviewForUnit } from './runtime.js';
 import { readPausedReviewGateState } from './pause-state.js';
+import { TandemReviewOverlay, type ReviewPanelData } from './review-panel.js';
 import type { ReviewGateState, ReviewTransport, ReviewUnitIdentity } from './types.js';
 import { sameReviewUnit } from './types.js';
 
@@ -87,6 +88,131 @@ function shouldPersistLiveReviewState(args: {
   }
 
   return sameReviewUnit(args.liveState?.unit, args.target);
+}
+
+function latestReviewerFeedback(messages: Array<{ authorRole: string; body: string }>): string | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.authorRole === 'reviewer' && message.body.trim().length > 0) {
+      return message.body;
+    }
+  }
+
+  return null;
+}
+
+export async function collectReviewPanelData(args: {
+  session: AutoSession | null;
+  projectRoot: string;
+  transport: ReviewTransport;
+}): Promise<ReviewPanelData> {
+  const liveState = args.session?.reviewGateState ?? null;
+  const pausedState = liveState ? null : await readPausedReviewGateState(args.projectRoot);
+  let state: ReviewGateState | null = liveState ?? pausedState;
+  let stateSource: 'live' | 'paused' | undefined = liveState ? 'live' : pausedState ? 'paused' : undefined;
+  let refreshed: boolean | undefined;
+  let reviewerFeedback: string | null = state?.feedback ?? null;
+  let error: string | null = null;
+
+  try {
+    const statusResult = await readReviewStatus({
+      liveState,
+      pausedState,
+      transport: args.transport,
+    });
+    state = statusResult.state;
+    stateSource = statusResult.source;
+    refreshed = statusResult.refreshed;
+    reviewerFeedback = state.feedback;
+    if (args.session) {
+      args.session.reviewGateState = state;
+    }
+  } catch (caught) {
+    if (!(caught instanceof Error && caught.message === 'review_state_missing')) {
+      error = caught instanceof Error ? caught.message : String(caught);
+    }
+  }
+
+  let recentReviews: ReviewPanelData['recentReviews'] = [];
+  try {
+    recentReviews = args.transport.listRecentReviews
+      ? await args.transport.listRecentReviews({ projectRoot: args.projectRoot, limit: 8 })
+      : [];
+  } catch (caught) {
+    error = caught instanceof Error ? caught.message : String(caught);
+  }
+
+  const activeReviewId = state?.reviewId ?? recentReviews[0]?.reviewId ?? null;
+  if (activeReviewId && args.transport.getReviewDiscussion) {
+    try {
+      const feedback = latestReviewerFeedback(await args.transport.getReviewDiscussion(activeReviewId));
+      if (feedback) reviewerFeedback = feedback;
+    } catch {
+      // Missing discussion data should not prevent the status overlay from opening.
+    }
+  }
+
+  const panelData: ReviewPanelData = {
+    projectRoot: args.projectRoot,
+    state,
+    target: state?.unit ?? null,
+    reviewerFeedback,
+    recentReviews,
+    error,
+  };
+  if (stateSource !== undefined) panelData.stateSource = stateSource;
+  if (refreshed !== undefined) panelData.refreshed = refreshed;
+  return panelData;
+}
+
+export async function openReviewPanel(args: {
+  ctx: unknown;
+  session: AutoSession | null;
+  projectRoot: string;
+  transport: ReviewTransport;
+  fallbackText?: string;
+}): Promise<void> {
+  const context = args.ctx as {
+    ui?: {
+      custom?: (
+        factory: (tui: unknown, theme: unknown, keybindings: unknown, done: (value?: unknown) => void) => unknown,
+        options?: unknown,
+      ) => Promise<unknown>;
+    };
+  } | null;
+
+  if (!context?.ui || typeof context.ui.custom !== 'function') {
+    console.log(args.fallbackText ?? await handleReviewStatus({
+      session: args.session,
+      projectRoot: args.projectRoot,
+      transport: args.transport,
+    }));
+    return;
+  }
+
+  const data = await collectReviewPanelData({
+    session: args.session,
+    projectRoot: args.projectRoot,
+    transport: args.transport,
+  });
+
+  await context.ui.custom(
+    (tui, theme, _keybindings, done) => new TandemReviewOverlay(
+      tui as { requestRender?: () => void },
+      theme as { fg?: (name: string, text: string) => string; bold?: (text: string) => string },
+      data,
+      done,
+    ),
+    {
+      overlay: true,
+      overlayOptions: {
+        anchor: 'center',
+        width: '90%',
+        minWidth: 80,
+        maxHeight: '92%',
+      },
+    },
+  );
 }
 
 export async function handleReviewSubmit(args: {

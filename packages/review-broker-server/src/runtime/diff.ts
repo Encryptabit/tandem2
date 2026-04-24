@@ -84,11 +84,10 @@ function runGitApplyCheck(options: { diff: string; workspaceRoot: string; affect
     writeFileSync(patchPath, options.diff, 'utf8');
 
     // Validate against a temporary index seeded from HEAD so the check is
-    // independent of the live worktree/index. This is required for the worktree-
-    // diff workflow (see review-broker-extension Fix 1) — applying forward
-    // against the live worktree fails when the changes are already present
-    // there. Validating against HEAD answers the right question: "does this
-    // patch apply cleanly on top of the last committed state?"
+    // independent of the live worktree/index. Worktree proposals should apply
+    // forward to HEAD. GSD's default committed proposal flow has already moved
+    // HEAD to the proposed state, so those diffs validate by applying cleanly in
+    // reverse from HEAD.
     const childEnv = { ...process.env, GIT_INDEX_FILE: tempIndexPath };
 
     const readTree = spawnSync('git', ['-C', options.workspaceRoot, 'read-tree', 'HEAD'], {
@@ -115,30 +114,62 @@ function runGitApplyCheck(options: { diff: string; workspaceRoot: string; affect
       });
     }
 
-    const result = spawnSync(
+    const forwardResult = spawnSync(
       'git',
       ['-C', options.workspaceRoot, 'apply', '--cached', '--check', patchPath],
       { encoding: 'utf8', env: childEnv },
     );
 
-    if (result.error) {
+    if (forwardResult.error) {
       throw new DiffValidationError({
         code: 'DIFF_VALIDATION_FAILED',
-        message: `Failed to execute git apply --cached --check in ${options.workspaceRoot}: ${result.error.message}`,
+        message: `Failed to execute git apply --cached --check in ${options.workspaceRoot}: ${forwardResult.error.message}`,
         workspaceRoot: options.workspaceRoot,
         affectedFiles: options.affectedFiles,
       });
     }
 
-    if (result.status !== 0) {
-      const details = [result.stderr, result.stdout].map((value) => value.trim()).filter(Boolean).join(' | ');
+    if (forwardResult.status === 0) {
+      return;
+    }
+
+    const reverseResult = spawnSync(
+      'git',
+      ['-C', options.workspaceRoot, 'apply', '--cached', '--check', '--reverse', patchPath],
+      { encoding: 'utf8', env: childEnv },
+    );
+
+    if (reverseResult.error) {
       throw new DiffValidationError({
-        code: 'INVALID_DIFF',
-        message: details || `git apply --cached --check rejected the diff in ${options.workspaceRoot}.`,
+        code: 'DIFF_VALIDATION_FAILED',
+        message: `Failed to execute git apply --cached --check --reverse in ${options.workspaceRoot}: ${reverseResult.error.message}`,
         workspaceRoot: options.workspaceRoot,
         affectedFiles: options.affectedFiles,
       });
     }
+
+    if (reverseResult.status === 0) {
+      return;
+    }
+
+    const forwardDetails = [forwardResult.stderr, forwardResult.stdout]
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .join(' | ');
+    const reverseDetails = [reverseResult.stderr, reverseResult.stdout]
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .join(' | ');
+    const details = [forwardDetails, reverseDetails ? `reverse check: ${reverseDetails}` : '']
+      .filter(Boolean)
+      .join(' | ');
+
+    throw new DiffValidationError({
+      code: 'INVALID_DIFF',
+      message: details || `git apply --cached --check rejected the diff in ${options.workspaceRoot}.`,
+      workspaceRoot: options.workspaceRoot,
+      affectedFiles: options.affectedFiles,
+    });
   } finally {
     rmSync(tempDirectory, { recursive: true, force: true });
   }

@@ -15,8 +15,10 @@ interface MockExtensionAPI {
   cwd: string;
   handlers: Map<string, (event: any, ctx: any) => Promise<any>>;
   commands: Map<string, { description?: string; handler: (args: string, ctx: any) => Promise<void> }>;
+  shortcuts: Map<string, { description?: string; handler: (ctx: any) => Promise<void> | void }>;
   on(event: string, handler: (event: any, ctx: any) => Promise<any>): void;
   registerCommand(name: string, options: { description?: string; handler: (args: string, ctx: any) => Promise<void> }): void;
+  registerShortcut(name: string, options: { description?: string; handler: (ctx: any) => Promise<void> | void }): void;
 }
 
 function createMockExtensionAPI(): MockExtensionAPI {
@@ -24,11 +26,15 @@ function createMockExtensionAPI(): MockExtensionAPI {
     cwd: tmpRoot,
     handlers: new Map(),
     commands: new Map(),
+    shortcuts: new Map(),
     on(event, handler) {
       api.handlers.set(event, handler);
     },
     registerCommand(name, options) {
       api.commands.set(name, options);
+    },
+    registerShortcut(name, options) {
+      api.shortcuts.set(name, options);
     },
   };
   return api;
@@ -67,6 +73,8 @@ describe('createTandemReviewExtension', () => {
     expect(api.handlers.has('before_next_dispatch')).toBe(true);
     expect(api.handlers.has('before_agent_start')).toBe(true);
     expect(api.commands.has('review')).toBe(true);
+    expect(api.shortcuts.has('ctrl+alt+r')).toBe(true);
+    expect(api.shortcuts.has('ctrl+shift+r')).toBe(true);
   });
 
   it('publishes a REVIEW footer status while a broker review is pending', async () => {
@@ -271,6 +279,15 @@ describe('createTandemReviewExtension', () => {
       failureContext: expect.stringContaining('Use named exports.'),
     });
 
+    const blockedFile = await readFile(
+      path.join(tmpRoot, '.gsd', 'runtime', 'tandem-review-state.json'),
+      'utf8',
+    );
+    const parsedBlocked = JSON.parse(blockedFile);
+    expect(parsedBlocked.reason).toBe('review-blocked');
+    expect(parsedBlocked.pausedReviewState.reviewGateState.reviewId).toBe('rev-auto-loop');
+    expect(parsedBlocked.pausedReviewState.reviewGateState.status).toBe('changes_requested');
+
     const beforeAgentStart = api.handlers.get('before_agent_start')!;
     const agentPromptResult = await beforeAgentStart({
       systemPrompt: 'BASE SYSTEM PROMPT',
@@ -387,7 +404,130 @@ describe('createTandemReviewExtension', () => {
     expect(result.action).toBe('continue');
   });
 
-  it('review command outputs status text', async () => {
+  it('review command opens the status overlay when UI is available', async () => {
+    const { writePausedReviewGateState } = await import('../src/pause-state.js');
+    const { createReviewGateState } = await import('../src/types.js');
+    await writePausedReviewGateState(
+      tmpRoot,
+      createReviewGateState({
+        phase: 'waiting',
+        unit: { unitId: 'M001/S01/T01' },
+        reviewId: 'rev-overlay',
+        status: 'pending',
+        decision: 'wait',
+        blockedPolicy: 'auto-loop',
+        summary: 'Queued.',
+      }),
+      'review-waiting',
+    );
+
+    const transport: ReviewTransport = {
+      async submitReview() {
+        throw new Error('not used');
+      },
+      async getStatus(reviewId) {
+        return { reviewId, status: 'pending', summary: 'Still queued.' };
+      },
+      async getReviewDiscussion(reviewId) {
+        return [{
+          messageId: 1,
+          reviewId,
+          actorId: 'reviewer-1',
+          authorRole: 'reviewer',
+          body: 'Reviewer feedback goes here.',
+          createdAt: new Date().toISOString(),
+        }];
+      },
+      async listRecentReviews() {
+        return [{
+          reviewId: 'rev-overlay',
+          title: 'Review: M001/S01/T01',
+          workspaceRoot: tmpRoot,
+          projectName: 'tmp',
+          status: 'pending',
+          priority: 'normal',
+          authorId: 'tester',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          claimedBy: null,
+          claimedAt: null,
+          claimGeneration: 0,
+          currentRound: 1,
+          latestVerdict: null,
+          verdictReason: null,
+          counterPatchStatus: 'none',
+          lastMessageAt: null,
+          lastActivityAt: null,
+        }];
+      },
+    };
+
+    const register = createTandemReviewExtension({ transport });
+    const api = createMockExtensionAPI();
+    await register(api);
+
+    let rendered = '';
+    let overlayOptions: unknown;
+    const uiContext = {
+      ui: {
+        async custom(factory: any, options: any) {
+          overlayOptions = options?.overlayOptions;
+          const component = factory(
+            { requestRender() {} },
+            { fg: (_name: string, text: string) => text, bold: (text: string) => text },
+            {},
+            () => {},
+          );
+          rendered = component.render(100).join('\n');
+        },
+      },
+    };
+
+    await api.commands.get('review')!.handler('status', uiContext);
+
+    expect(rendered).toContain('Tandem Review');
+    expect(rendered).toContain('rev-overlay');
+    expect(rendered).toContain('Reviewer feedback goes here.');
+    expect(rendered).toContain('Recent Reviews');
+    expect(rendered.split('\n')[0]).toHaveLength(100);
+    expect(overlayOptions).toMatchObject({
+      anchor: 'center',
+      width: '90%',
+      minWidth: 80,
+      maxHeight: '92%',
+    });
+  });
+
+  it('review shortcuts open the same status overlay', async () => {
+    const transport = createMockTransport();
+    const register = createTandemReviewExtension({ transport });
+    const api = createMockExtensionAPI();
+    await register(api);
+
+    let opened = false;
+    await api.shortcuts.get('ctrl+alt+r')!.handler({
+      ui: {
+        async custom() {
+          opened = true;
+        },
+      },
+    });
+
+    expect(opened).toBe(true);
+
+    opened = false;
+    await api.shortcuts.get('ctrl+shift+r')!.handler({
+      ui: {
+        async custom() {
+          opened = true;
+        },
+      },
+    });
+
+    expect(opened).toBe(true);
+  });
+
+  it('review command keeps text fallback when UI is unavailable', async () => {
     const transport = createMockTransport();
     const register = createTandemReviewExtension({ transport });
     const api = createMockExtensionAPI();
