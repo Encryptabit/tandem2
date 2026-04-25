@@ -593,8 +593,9 @@ export function createBrokerService(context: AppContext, options: CreateBrokerSe
     async submitVerdict(input) {
       const request = parseWithSchema(SubmitVerdictRequestSchema, input);
       const current = ensureReviewExists(context, request.reviewId);
+      const isChangesRequestedApproval = current.status === 'changes_requested' && request.verdict === 'approved';
 
-      if (current.status !== 'claimed' && current.status !== 'submitted') {
+      if (current.status !== 'claimed' && current.status !== 'submitted' && !isChangesRequestedApproval) {
         persistTransitionRejection({
           context,
           review: current,
@@ -697,7 +698,9 @@ export function createBrokerService(context: AppContext, options: CreateBrokerSe
             roundNumber: workingReview.currentRound,
             summary:
               request.verdict === 'approved'
-                ? 'Reviewer approved the review.'
+                ? workingReview.status === 'changes_requested'
+                  ? 'Review manually approved after changes were requested.'
+                  : 'Reviewer approved the review.'
                 : 'Reviewer requested changes.',
           },
         });
