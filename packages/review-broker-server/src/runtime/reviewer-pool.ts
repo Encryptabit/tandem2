@@ -84,6 +84,7 @@ export interface CreatePoolManagerOptions {
   notifications: { notify: (topic: string) => number };
   spawnCommand: string;
   spawnArgs: string[];
+  spawnEnv?: Record<string, string>;
   logDir?: string;
   now?: () => string;
 }
@@ -107,6 +108,7 @@ export function createPoolManager(options: CreatePoolManagerOptions): PoolManage
     notifications,
     spawnCommand,
     spawnArgs,
+    spawnEnv,
     logDir,
   } = options;
   const getNow = options.now ?? (() => new Date().toISOString());
@@ -219,6 +221,7 @@ export function createPoolManager(options: CreatePoolManagerOptions): PoolManage
             reviewerManager.spawnReviewer({
               command: spawnCommand,
               args: spawnArgs,
+              ...(spawnEnv ? { env: spawnEnv } : {}),
               ...(logDir ? { logDir } : {}),
               sessionToken,
             }),

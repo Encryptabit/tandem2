@@ -48,6 +48,7 @@ export interface SpawnReviewerInput {
   logDir?: string;
   sessionToken?: string;
   detached?: boolean;
+  env?: Record<string, string>;
 }
 
 export interface StopReviewerOptions {
@@ -130,6 +131,7 @@ export function createReviewerManager(options: CreateReviewerManagerOptions): Re
           : { stdio: ['pipe', 'pipe', 'pipe'] as const }),
         env: {
           ...process.env,
+          ...(input.env ?? {}),
           REVIEW_BROKER_REVIEWER_ID: reviewerId,
           REVIEW_BROKER_WORKSPACE_ROOT: options.workspaceRoot,
           ...(options.dbPath ? { REVIEW_BROKER_DB_PATH: options.dbPath } : {}),
@@ -278,6 +280,14 @@ export function createReviewerManager(options: CreateReviewerManagerOptions): Re
 
     child.stdout!.on('data', makeDataHandler('stdout'));
     child.stderr!.on('data', makeDataHandler('stderr'));
+    child.stdin!.on('error', (error) => {
+      logWriter?.write({
+        ts: new Date().toISOString(),
+        reviewerId,
+        stream: 'stderr',
+        message: `[reviewer-manager] stdin error: ${error instanceof Error ? error.message : String(error)}`,
+      });
+    });
 
     // Handle stdin: pipe prompt if provided, then close.
     if (input.prompt != null) {

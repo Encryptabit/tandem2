@@ -179,6 +179,10 @@ export function startBroker(options: StartBrokerOptions = {}): StartedBrokerRunt
 
     const spawnCommand = options.poolSpawnCommand ?? configuredProvider?.command;
     const spawnArgs = options.poolSpawnArgs ?? configuredProvider?.args ?? [];
+    const spawnEnv =
+      configuredProvider?.providerName !== undefined
+        ? { REVIEWER_PROVIDER_NAME: configuredProvider.providerName }
+        : undefined;
 
     if (spawnCommand) {
       validateReviewerWorkerCommand(spawnCommand, spawnArgs, 'Pool worker');
@@ -199,6 +203,7 @@ export function startBroker(options: StartBrokerOptions = {}): StartedBrokerRunt
       notifications: context.notifications,
       spawnCommand,
       spawnArgs,
+      ...(spawnEnv ? { spawnEnv } : {}),
       ...(options.poolLogDir !== undefined ? { logDir: options.poolLogDir } : {}),
       ...(options.now !== undefined ? { now: options.now } : {}),
     });

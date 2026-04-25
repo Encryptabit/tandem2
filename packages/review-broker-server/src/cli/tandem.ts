@@ -562,20 +562,24 @@ async function handleReviewersSpawn(
     throw new Error('Either --command or --provider is required for "reviewers spawn".');
   }
 
-  const response = detachedFlag
-    ? {
+  const spawnInput = {
+    command,
+    args: spawnArgs ?? [],
+    ...(providerFlag ? { env: { REVIEWER_PROVIDER_NAME: providerFlag } } : {}),
+    ...(cwdFlag !== undefined ? { cwd: cwdFlag } : {}),
+  };
+
+  const response =
+    detachedFlag || providerFlag
+      ? {
         reviewer: await runtime.context.reviewerManager.spawnReviewer({
-          command,
-          args: spawnArgs ?? [],
-          ...(cwdFlag !== undefined ? { cwd: cwdFlag } : {}),
-          detached: true,
+          ...spawnInput,
+          ...(detachedFlag ? { detached: true } : {}),
         }),
         version: runtime.context.notifications.currentVersion('reviewer-state'),
       }
     : await runtime.service.spawnReviewer({
-        command,
-        args: spawnArgs ?? [],
-        ...(cwdFlag !== undefined ? { cwd: cwdFlag } : {}),
+        ...spawnInput,
       });
 
   if (options.json) {
