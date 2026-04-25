@@ -30,6 +30,7 @@ describe('reviewer worker script', () => {
         TANDEM_LOG_PATH: harness.tandemLogPath,
         TANDEM_STATE_PATH: harness.statePath,
         REVIEW_BROKER_REVIEWER_ID: 'reviewer-loop-1',
+        REVIEWER_PROVIDER_NAME: 'gsd',
         REVIEWER_MODEL: '',
         REVIEWER_POLL_INTERVAL_MS: '25',
       },
@@ -75,6 +76,7 @@ describe('reviewer worker script', () => {
         TANDEM_LOG_PATH: harness.tandemLogPath,
         TANDEM_STATE_PATH: harness.statePath,
         REVIEW_BROKER_REVIEWER_ID: 'reviewer-single-1',
+        REVIEWER_PROVIDER_NAME: 'gsd',
         REVIEWER_MODEL: 'single-model',
       },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -95,10 +97,225 @@ describe('reviewer worker script', () => {
     expect(gsdEntries[0]?.args.slice(0, 4)).toEqual(['--print', '--no-session', '--model', 'single-model']);
     expect(gsdEntries[0]?.args.at(-1)).toContain('rvw_single_1');
   });
+
+  it('default codex provider runs codex exec with the review prompt on stdin instead of invoking gsd', async () => {
+    const harness = createHarness({ mode: 'queue', gsdMessage: null });
+    const child = spawn(process.execPath, [harness.workerScriptPath], {
+      cwd: WORKTREE_ROOT,
+      env: {
+        ...process.env,
+        PATH: `${harness.binDir}:${process.env.PATH ?? ''}`,
+        CODEX_LOG_PATH: harness.codexLogPath,
+        GSD_LOG_PATH: harness.gsdLogPath,
+        TANDEM_LOG_PATH: harness.tandemLogPath,
+        TANDEM_STATE_PATH: harness.statePath,
+        REVIEW_BROKER_REVIEWER_ID: 'reviewer-loop-codex',
+        REVIEWER_MODEL: '',
+        REVIEWER_POLL_INTERVAL_MS: '25',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    try {
+      await waitForTandemCommand(harness.tandemLogPath, 'reviews', 'verdict');
+    } finally {
+      child.kill('SIGTERM');
+      await waitForExit(child);
+    }
+
+    expect(readLogEntries(harness.gsdLogPath)).toHaveLength(0);
+
+    const codexEntries = readLogEntries(harness.codexLogPath) as Array<{
+      args: string[];
+      stdinLength: number;
+      stdinIncludesDiff: boolean;
+      stdinIncludesReviewId: boolean;
+    }>;
+
+    expect(codexEntries).toHaveLength(1);
+    expect(codexEntries[0]!.args).toEqual([
+      '--ask-for-approval',
+      'never',
+      'exec',
+      '--ephemeral',
+      '--sandbox',
+      'read-only',
+      '-',
+    ]);
+    expect(codexEntries[0]!.args.join(' ')).not.toContain('diff --git');
+    expect(codexEntries[0]!.stdinLength).toBeGreaterThan(0);
+    expect(codexEntries[0]!.stdinIncludesDiff).toBe(true);
+    expect(codexEntries[0]!.stdinIncludesReviewId).toBe(true);
+  });
+
+  it('codex provider submits fallback verdict when codex exits before reading stdin', async () => {
+    const harness = createHarness({
+      mode: 'queue',
+      gsdMessage: null,
+      codexExitCode: 1,
+      codexReadStdin: false,
+      codexStderr: 'codex exited before stdin',
+      proposalDiff: `diff --git a/large.json b/large.json\n+${'x'.repeat(120_000)}`,
+    });
+    const child = spawn(process.execPath, [harness.workerScriptPath], {
+      cwd: WORKTREE_ROOT,
+      env: {
+        ...process.env,
+        PATH: `${harness.binDir}:${process.env.PATH ?? ''}`,
+        CODEX_LOG_PATH: harness.codexLogPath,
+        GSD_LOG_PATH: harness.gsdLogPath,
+        TANDEM_LOG_PATH: harness.tandemLogPath,
+        TANDEM_STATE_PATH: harness.statePath,
+        REVIEW_BROKER_REVIEWER_ID: 'reviewer-loop-codex-epipe',
+        REVIEWER_MODEL: '',
+        REVIEWER_POLL_INTERVAL_MS: '25',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    try {
+      await waitForTandemCommand(harness.tandemLogPath, 'reviews', 'verdict');
+    } finally {
+      child.kill('SIGTERM');
+      await waitForExit(child);
+    }
+
+    expect(readLogEntries(harness.gsdLogPath)).toHaveLength(0);
+
+    const tandemEntries = readLogEntries(harness.tandemLogPath);
+    const verdictEntry = tandemEntries.find((entry) => entry.args[0] === 'reviews' && entry.args[1] === 'verdict');
+    const reasonIndex = verdictEntry!.args.indexOf('--reason');
+    const reason = verdictEntry!.args[reasonIndex + 1]!;
+
+    expect(reason).toContain('Automated reviewer fallback');
+    expect(reason).toContain('codex invocation failed');
+    expect(reason).toContain('codex exited before stdin');
+    expect(tandemEntries.some((entry) => entry.args[0] === 'reviews' && entry.args[1] === 'reclaim')).toBe(false);
+
+    const state = JSON.parse(readFileSync(harness.statePath, 'utf8')) as { status: string };
+    expect(state.status).toBe('approved');
+  });
+
+  it('model failure fallback does not echo the full proposal prompt into the verdict reason', async () => {
+    const harness = createHarness({
+      mode: 'queue',
+      gsdExitCode: 1,
+      gsdStderr: 'model unavailable',
+      gsdMessage: null,
+      proposalDiff: `diff --git a/large.json b/large.json\n+${'x'.repeat(120_000)}`,
+    });
+    const child = spawn(process.execPath, [harness.workerScriptPath], {
+      cwd: WORKTREE_ROOT,
+      env: {
+        ...process.env,
+        PATH: `${harness.binDir}:${process.env.PATH ?? ''}`,
+        GSD_LOG_PATH: harness.gsdLogPath,
+        TANDEM_LOG_PATH: harness.tandemLogPath,
+        TANDEM_STATE_PATH: harness.statePath,
+        REVIEW_BROKER_REVIEWER_ID: 'reviewer-loop-model-fallback',
+        REVIEWER_PROVIDER_NAME: 'gsd',
+        REVIEWER_MODEL: '',
+        REVIEWER_POLL_INTERVAL_MS: '25',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    try {
+      await waitForTandemCommand(harness.tandemLogPath, 'reviews', 'verdict');
+    } finally {
+      child.kill('SIGTERM');
+      await waitForExit(child);
+    }
+
+    const tandemEntries = readLogEntries(harness.tandemLogPath);
+    const verdictEntry = tandemEntries.find((entry) => entry.args[0] === 'reviews' && entry.args[1] === 'verdict');
+    const reasonIndex = verdictEntry!.args.indexOf('--reason');
+    const reason = verdictEntry!.args[reasonIndex + 1]!;
+
+    expect(reason.length).toBeLessThanOrEqual(8_000);
+    expect(reason).toContain('<prompt>');
+    expect(reason).toContain('model unavailable');
+    expect(reason).not.toContain('Review payload');
+    expect(reason).not.toContain('xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx');
+  });
+
+  it('queue mode submits a bounded fallback verdict and exits when the first verdict submit fails', async () => {
+    const harness = createHarness({ mode: 'queue', failVerdictCount: 1, gsdMessage: null });
+    const child = spawn(process.execPath, [harness.workerScriptPath], {
+      cwd: WORKTREE_ROOT,
+      env: {
+        ...process.env,
+        PATH: `${harness.binDir}:${process.env.PATH ?? ''}`,
+        GSD_LOG_PATH: harness.gsdLogPath,
+        TANDEM_LOG_PATH: harness.tandemLogPath,
+        TANDEM_STATE_PATH: harness.statePath,
+        REVIEW_BROKER_REVIEWER_ID: 'reviewer-loop-recover-verdict',
+        REVIEWER_PROVIDER_NAME: 'gsd',
+        REVIEWER_MODEL: '',
+        REVIEWER_POLL_INTERVAL_MS: '25',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    const exit = await waitForExit(child);
+    expect(exit.exitCode).toBe(1);
+
+    const tandemEntries = readLogEntries(harness.tandemLogPath);
+    const verdictEntries = tandemEntries.filter((entry) => entry.args[0] === 'reviews' && entry.args[1] === 'verdict');
+
+    expect(verdictEntries).toHaveLength(2);
+    const fallbackReasonIndex = verdictEntries[1]!.args.indexOf('--reason');
+    expect(verdictEntries[1]!.args[fallbackReasonIndex + 1]).toContain('Automated reviewer fallback');
+
+    const state = JSON.parse(readFileSync(harness.statePath, 'utf8')) as { status: string };
+    expect(state.status).toBe('approved');
+  });
+
+  it('queue mode reclaims and exits when fallback verdict submission also fails', async () => {
+    const harness = createHarness({ mode: 'queue', failAllVerdicts: true, gsdMessage: null });
+    const child = spawn(process.execPath, [harness.workerScriptPath], {
+      cwd: WORKTREE_ROOT,
+      env: {
+        ...process.env,
+        PATH: `${harness.binDir}:${process.env.PATH ?? ''}`,
+        GSD_LOG_PATH: harness.gsdLogPath,
+        TANDEM_LOG_PATH: harness.tandemLogPath,
+        TANDEM_STATE_PATH: harness.statePath,
+        REVIEW_BROKER_REVIEWER_ID: 'reviewer-loop-reclaim',
+        REVIEWER_PROVIDER_NAME: 'gsd',
+        REVIEWER_MODEL: '',
+        REVIEWER_POLL_INTERVAL_MS: '25',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    const exit = await waitForExit(child);
+    expect(exit.exitCode).toBe(1);
+
+    const tandemEntries = readLogEntries(harness.tandemLogPath);
+    const commands = tandemEntries.map((entry) => `${entry.args[0] ?? ''} ${entry.args[1] ?? ''}`.trim());
+
+    expect(commands).toEqual(expect.arrayContaining(['reviews show', 'reviews reclaim']));
+
+    const state = JSON.parse(readFileSync(harness.statePath, 'utf8')) as { status: string };
+    expect(state.status).toBe('pending');
+  });
 });
 
-function createHarness(options: { mode: 'queue' | 'single' }): {
+function createHarness(options: {
+  mode: 'queue' | 'single';
+  gsdMessage?: string | null;
+  gsdExitCode?: number;
+  gsdStderr?: string;
+  codexExitCode?: number;
+  codexReadStdin?: boolean;
+  codexStderr?: string;
+  proposalDiff?: string;
+  failVerdictCount?: number;
+  failAllVerdicts?: boolean;
+}): {
   binDir: string;
+  codexLogPath: string;
   gsdLogPath: string;
   tandemLogPath: string;
   statePath: string;
@@ -111,6 +328,7 @@ function createHarness(options: { mode: 'queue' | 'single' }): {
   mkdirSync(binDir, { recursive: true });
 
   const gsdLogPath = path.join(directory, 'gsd-log.jsonl');
+  const codexLogPath = path.join(directory, 'codex-log.jsonl');
   const tandemLogPath = path.join(directory, 'tandem-log.jsonl');
   const statePath = path.join(directory, 'tandem-state.json');
 
@@ -119,8 +337,12 @@ function createHarness(options: { mode: 'queue' | 'single' }): {
     JSON.stringify(
       {
         mode: options.mode,
+        status: 'pending',
         queueClaimed: false,
         singleClaimed: false,
+        verdictAttempts: 0,
+        failVerdictCount: options.failVerdictCount ?? 0,
+        failAllVerdicts: options.failAllVerdicts ?? false,
       },
       null,
       2,
@@ -128,15 +350,71 @@ function createHarness(options: { mode: 'queue' | 'single' }): {
     'utf8',
   );
 
+  const gsdDecision = {
+    verdict: 'approved',
+    reason: 'Looks good',
+    ...(options.gsdMessage === null ? {} : { message: options.gsdMessage ?? 'Automated feedback' }),
+  };
   const fakeGsdPath = path.join(binDir, 'gsd');
   const fakeGsdBody = `#!/usr/bin/env node
 import { appendFileSync } from 'node:fs';
 appendFileSync(process.env.GSD_LOG_PATH, JSON.stringify({ args: process.argv.slice(2) }) + '\\n');
-process.stdout.write(JSON.stringify({ verdict: 'approved', reason: 'Looks good', message: 'Automated feedback' }));
+if (${JSON.stringify(options.gsdExitCode ?? 0)} !== 0) {
+  process.stderr.write(${JSON.stringify(options.gsdStderr ?? 'Injected gsd failure')});
+  process.exit(${JSON.stringify(options.gsdExitCode ?? 0)});
+}
+process.stdout.write(${JSON.stringify(JSON.stringify(gsdDecision))});
 process.exit(0);
 `;
 
+  const fakeCodexPath = path.join(binDir, 'codex');
+  const fakeCodexBody =
+    options.codexReadStdin === false
+      ? `#!/usr/bin/env node
+import { appendFileSync } from 'node:fs';
+
+const args = process.argv.slice(2);
+appendFileSync(
+  process.env.CODEX_LOG_PATH,
+  JSON.stringify({
+    args,
+    stdinLength: null,
+    exitedBeforeReadingStdin: true,
+  }) + '\\n',
+);
+process.stderr.write(${JSON.stringify(options.codexStderr ?? 'Injected codex failure')});
+process.exit(${JSON.stringify(options.codexExitCode ?? 1)});
+`
+      : `#!/usr/bin/env node
+import { appendFileSync } from 'node:fs';
+
+const args = process.argv.slice(2);
+let stdin = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', (chunk) => {
+  stdin += chunk;
+});
+process.stdin.on('end', () => {
+  appendFileSync(
+    process.env.CODEX_LOG_PATH,
+    JSON.stringify({
+      args,
+      stdinLength: stdin.length,
+      stdinIncludesDiff: stdin.includes('diff --git'),
+      stdinIncludesReviewId: stdin.includes('rvw_queue_1'),
+    }) + '\\n',
+  );
+  if (${JSON.stringify(options.codexExitCode ?? 0)} !== 0) {
+    process.stderr.write(${JSON.stringify(options.codexStderr ?? 'Injected codex failure')});
+    process.exit(${JSON.stringify(options.codexExitCode ?? 0)});
+  }
+  process.stdout.write(${JSON.stringify(JSON.stringify(gsdDecision))});
+  process.exit(0);
+});
+`;
+
   const fakeTandemPath = path.join(binDir, 'tandem');
+  const proposalDiff = options.proposalDiff ?? 'diff --git a/file.ts b/file.ts\\n+change';
   const fakeTandemBody = `#!/usr/bin/env node
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 
@@ -146,7 +424,15 @@ appendFileSync(process.env.TANDEM_LOG_PATH, JSON.stringify({ args }) + '\\n');
 const statePath = process.env.TANDEM_STATE_PATH;
 const state = existsSync(statePath)
   ? JSON.parse(readFileSync(statePath, 'utf8'))
-  : { mode: 'queue', queueClaimed: false, singleClaimed: false };
+  : {
+      mode: 'queue',
+      status: 'pending',
+      queueClaimed: false,
+      singleClaimed: false,
+      verdictAttempts: 0,
+      failVerdictCount: 0,
+      failAllVerdicts: false,
+    };
 
 function saveState() {
   writeFileSync(statePath, JSON.stringify(state, null, 2));
@@ -158,7 +444,7 @@ function output(value) {
 }
 
 if (args[0] === 'reviews' && args[1] === 'list') {
-  if (state.mode === 'queue' && !state.queueClaimed) {
+  if (state.mode === 'queue' && state.status === 'pending' && !state.queueClaimed) {
     output({ reviews: [{ reviewId: 'rvw_queue_1' }], version: 1 });
   }
   output({ reviews: [], version: 1 });
@@ -166,17 +452,43 @@ if (args[0] === 'reviews' && args[1] === 'list') {
 
 if (args[0] === 'reviews' && args[1] === 'claim') {
   const reviewId = args[2];
-  if (reviewId === 'rvw_queue_1' && state.mode === 'queue' && !state.queueClaimed) {
+  if (reviewId === 'rvw_queue_1' && state.mode === 'queue' && state.status === 'pending' && !state.queueClaimed) {
     state.queueClaimed = true;
+    state.status = 'claimed';
     saveState();
     output({ outcome: 'claimed', review: { reviewId }, version: 2 });
   }
-  if (reviewId === 'rvw_single_1' && state.mode === 'single' && !state.singleClaimed) {
+  if (reviewId === 'rvw_single_1' && state.mode === 'single' && state.status === 'pending' && !state.singleClaimed) {
     state.singleClaimed = true;
+    state.status = 'claimed';
     saveState();
     output({ outcome: 'claimed', review: { reviewId }, version: 2 });
   }
   output({ outcome: 'not_claimable', review: null, version: 2 });
+}
+
+if (args[0] === 'reviews' && args[1] === 'show') {
+  const reviewId = args[2];
+  output({
+    review: {
+      reviewId,
+      title: 'Fixture proposal',
+      status: state.status,
+      latestVerdict: state.status === 'approved' || state.status === 'changes_requested' ? state.status : null,
+    },
+    version: 3,
+  });
+}
+
+if (args[0] === 'reviews' && args[1] === 'reclaim') {
+  const reviewId = args[2];
+  if (state.status === 'claimed') {
+    state.status = 'pending';
+    saveState();
+    output({ review: { reviewId, status: 'pending' }, version: 4 });
+  }
+  process.stderr.write('Cannot reclaim status ' + state.status + '\\n');
+  process.exit(1);
 }
 
 if (args[0] === 'proposal' && args[1] === 'show') {
@@ -186,7 +498,7 @@ if (args[0] === 'proposal' && args[1] === 'show') {
       reviewId,
       title: 'Fixture proposal',
       description: 'Fixture description',
-      diff: 'diff --git a/file.ts b/file.ts\\n+change',
+      diff: ${JSON.stringify(proposalDiff)},
       affectedFiles: ['file.ts'],
       priority: 'normal',
       currentRound: 1,
@@ -202,6 +514,10 @@ if (args[0] === 'proposal' && args[1] === 'show') {
 
 if (args[0] === 'discussion' && args[1] === 'add') {
   const reviewId = args[2];
+  if (state.status === 'claimed') {
+    state.status = 'submitted';
+    saveState();
+  }
   output({
     review: { reviewId },
     message: {
@@ -218,21 +534,30 @@ if (args[0] === 'discussion' && args[1] === 'add') {
 
 if (args[0] === 'reviews' && args[1] === 'verdict') {
   const reviewId = args[2];
+  const verdict = args[args.indexOf('--verdict') + 1] || 'approved';
+  state.verdictAttempts = (state.verdictAttempts || 0) + 1;
+  saveState();
+  if (state.failAllVerdicts || state.verdictAttempts <= state.failVerdictCount) {
+    process.stderr.write('Injected verdict failure ' + state.verdictAttempts + '\\n');
+    process.exit(1);
+  }
+  state.status = verdict;
+  saveState();
   output({
     review: {
       reviewId,
-      status: 'approved',
-      latestVerdict: 'approved',
+      status: verdict,
+      latestVerdict: verdict,
     },
     proposal: {
       reviewId,
       title: 'Fixture proposal',
       description: 'Fixture description',
-      diff: 'diff --git a/file.ts b/file.ts\\n+change',
+      diff: ${JSON.stringify(proposalDiff)},
       affectedFiles: ['file.ts'],
       priority: 'normal',
       currentRound: 1,
-      latestVerdict: 'approved',
+      latestVerdict: verdict,
       verdictReason: 'Looks good',
       counterPatchStatus: 'none',
       lastMessageAt: null,
@@ -247,12 +572,15 @@ process.exit(1);
 `;
 
   writeFileSync(fakeGsdPath, fakeGsdBody, 'utf8');
+  writeFileSync(fakeCodexPath, fakeCodexBody, 'utf8');
   writeFileSync(fakeTandemPath, fakeTandemBody, 'utf8');
   chmodSync(fakeGsdPath, 0o755);
+  chmodSync(fakeCodexPath, 0o755);
   chmodSync(fakeTandemPath, 0o755);
 
   return {
     binDir,
+    codexLogPath,
     gsdLogPath,
     tandemLogPath,
     statePath,
@@ -291,13 +619,24 @@ async function waitForTandemCommand(logPath: string, noun: string, verb: string)
   throw new Error(`Timed out waiting for tandem command ${noun} ${verb}`);
 }
 
-async function waitForExit(child: ReturnType<typeof spawn>): Promise<void> {
+async function waitForExit(
+  child: ReturnType<typeof spawn>,
+  timeoutMs = 5_000,
+): Promise<{ exitCode: number | null; signalCode: NodeJS.Signals | null }> {
   if (child.exitCode !== null || child.signalCode !== null) {
-    return;
+    return { exitCode: child.exitCode, signalCode: child.signalCode };
   }
 
-  await new Promise<void>((resolve, reject) => {
-    child.once('exit', () => resolve());
+  return await new Promise<{ exitCode: number | null; signalCode: NodeJS.Signals | null }>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      child.kill('SIGTERM');
+      reject(new Error('Timed out waiting for worker process to exit.'));
+    }, timeoutMs);
+
+    child.once('exit', (exitCode, signalCode) => {
+      clearTimeout(timeout);
+      resolve({ exitCode, signalCode });
+    });
     child.once('error', reject);
   });
 }
