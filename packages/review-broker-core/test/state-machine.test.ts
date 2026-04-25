@@ -15,7 +15,7 @@ describe('review-broker-core state machine', () => {
       pending: ['claimed'],
       claimed: ['pending', 'submitted'],
       submitted: ['changes_requested', 'approved'],
-      changes_requested: ['pending'],
+      changes_requested: ['pending', 'approved'],
       approved: ['closed'],
       closed: [],
     });
@@ -29,6 +29,7 @@ describe('review-broker-core state machine', () => {
   it('accepts the preserved review-discussion and requeue transitions', () => {
     expect(canTransition('claimed', 'submitted')).toBe(true);
     expect(canTransition('changes_requested', 'pending')).toBe(true);
+    expect(canTransition('changes_requested', 'approved')).toBe(true);
     expect(validateTransition('approved', 'closed')).toEqual({
       ok: true,
       from: 'approved',
@@ -60,7 +61,7 @@ describe('review-broker-core state machine', () => {
       code: 'INVALID_REVIEW_TRANSITION',
       from: 'changes_requested',
       to: 'claimed',
-      allowed: ['pending'],
+      allowed: ['pending', 'approved'],
     });
 
     expect(validateTransition('approved', 'pending')).toEqual({

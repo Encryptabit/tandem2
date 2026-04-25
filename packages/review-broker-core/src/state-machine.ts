@@ -4,7 +4,7 @@ export const REVIEW_TRANSITIONS: Readonly<Record<ReviewStatus, readonly ReviewSt
   pending: ['claimed'],
   claimed: ['pending', 'submitted'],
   submitted: ['changes_requested', 'approved'],
-  changes_requested: ['pending'],
+  changes_requested: ['pending', 'approved'],
   approved: ['closed'],
   closed: [],
 };

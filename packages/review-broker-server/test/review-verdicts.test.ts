@@ -112,6 +112,72 @@ describe('review-broker-server verdict and counter-patch flows', () => {
     });
   });
 
+  it('allows a manual approved verdict to override changes_requested without requeueing', async () => {
+    const harness = createHarness([
+      '2026-03-21T12:30:00.000Z',
+      '2026-03-21T12:31:00.000Z',
+      '2026-03-21T12:32:00.000Z',
+      '2026-03-21T12:33:00.000Z',
+    ]);
+
+    const created = await harness.service.createReview({
+      title: 'Manual override review',
+      description: 'Verify operator approval can unblock a changes_requested review.',
+      diff: readFixture('valid-review.diff'),
+      authorId: 'agent-author',
+      priority: 'normal',
+    });
+
+    await harness.service.claimReview({
+      reviewId: created.review.reviewId,
+      claimantId: 'agent-reviewer',
+    });
+    await harness.service.submitVerdict({
+      reviewId: created.review.reviewId,
+      actorId: 'agent-reviewer',
+      verdict: 'changes_requested',
+      reason: 'Blocking feedback that the operator will override.',
+    });
+
+    const override = await harness.service.submitVerdict({
+      reviewId: created.review.reviewId,
+      actorId: 'user',
+      verdict: 'approved',
+      reason: 'move it along',
+    });
+
+    expect(override.review).toMatchObject({
+      reviewId: created.review.reviewId,
+      status: 'approved',
+      claimedBy: 'agent-reviewer',
+      currentRound: 1,
+      latestVerdict: 'approved',
+      verdictReason: 'move it along',
+      lastActivityAt: '2026-03-21T12:33:00.000Z',
+    });
+
+    const activity = await harness.service.getActivityFeed({ reviewId: created.review.reviewId });
+    expect(activity.activity.map((entry) => entry.eventType)).toEqual([
+      'review.created',
+      'review.claimed',
+      'review.submitted',
+      'review.changes_requested',
+      'review.approved',
+    ]);
+    expect(activity.activity.at(-1)).toMatchObject({
+      eventType: 'review.approved',
+      actorId: 'user',
+      statusFrom: 'changes_requested',
+      statusTo: 'approved',
+      summary: 'Review manually approved after changes were requested.',
+      metadata: {
+        reviewId: created.review.reviewId,
+        verdict: 'approved',
+        roundNumber: 1,
+      },
+    });
+  });
+
   it('accepts pending counter-patches and exposes the decision through review, proposal, repository, and activity surfaces', async () => {
     const harness = createHarness([
       '2026-03-21T13:00:00.000Z',

@@ -742,6 +742,61 @@ describe('tandem CLI smoke tests', () => {
       expect(output).toHaveProperty('proposal');
       expect(output).toHaveProperty('version');
     });
+
+    it('allows CLI operator approval from changes_requested', async () => {
+      const directory = mkdtempSync(path.join(os.tmpdir(), 'tandem-cli-verdict-override-'));
+      const localDbPath = path.join(directory, 'test.sqlite');
+      const context = createAppContext({
+        cwd: WORKTREE_ROOT,
+        dbPath: localDbPath,
+      });
+      const service = createBrokerService(context);
+
+      let localReviewId: string;
+      try {
+        const created = await service.createReview({
+          title: 'CLI override review',
+          description: 'Seeded for operator approval after changes_requested.',
+          diff: readFileSync(
+            path.join(WORKTREE_ROOT, 'packages', 'review-broker-server', 'test', 'fixtures', 'valid-review.diff'),
+            'utf8',
+          ),
+          authorId: 'test-author',
+          priority: 'normal',
+        });
+        localReviewId = created.review.reviewId;
+
+        await service.claimReview({
+          reviewId: localReviewId,
+          claimantId: 'cli-reviewer',
+        });
+        await service.submitVerdict({
+          reviewId: localReviewId,
+          actorId: 'cli-reviewer',
+          verdict: 'changes_requested',
+          reason: 'Blocking feedback that the operator will override.',
+        });
+      } finally {
+        context.close();
+      }
+
+      try {
+        const result = runTandem([
+          'reviews', 'verdict', localReviewId, '--actor', 'user',
+          '--verdict', 'approved', '--reason', 'move it along',
+          '--json', '--db-path', localDbPath,
+        ]);
+
+        expect(result.status).toBe(0);
+        const output = parseJsonOutput(result.stdout as string) as Record<string, unknown>;
+        const review = output.review as Record<string, unknown>;
+        expect(review.status).toBe('approved');
+        expect(review.latestVerdict).toBe('approved');
+        expect(review.verdictReason).toBe('move it along');
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    });
   });
 
   describe('discussion add', () => {
