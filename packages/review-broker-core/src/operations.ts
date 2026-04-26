@@ -5,6 +5,7 @@ import {
   AcceptCounterPatchResponseSchema,
   AddMessageRequestSchema,
   AddMessageResponseSchema,
+  ClaimNextPendingReviewRequestSchema,
   ClaimReviewRequestSchema,
   ClaimReviewResponseSchema,
   CloseReviewRequestSchema,
@@ -93,6 +94,12 @@ export const BROKER_OPERATIONS = Object.freeze([
     methodName: 'claimReview',
     mcpToolName: 'claim_review',
     requestSchema: ClaimReviewRequestSchema,
+    responseSchema: ClaimReviewResponseSchema,
+  }),
+  defineBrokerOperation({
+    methodName: 'claimNextPendingReview',
+    mcpToolName: 'claim_next_pending_review',
+    requestSchema: ClaimNextPendingReviewRequestSchema,
     responseSchema: ClaimReviewResponseSchema,
   }),
   defineBrokerOperation({

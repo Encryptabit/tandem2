@@ -278,7 +278,7 @@ describe('review-broker-server end-to-end standalone parity', () => {
       reviewerStatusCounts: {},
       messageCount: 2,
       auditEventCount: 11,
-      migrationCount: 4,
+      migrationCount: 5,
       statusCounts: {
         closed: 1,
       },
@@ -329,7 +329,13 @@ describe('review-broker-server end-to-end standalone parity', () => {
           event: 'broker.started',
           mode: 'once',
           dbPath: path.resolve(dbPath),
-          migrations: ['001_init', '002_review_lifecycle_parity', '003_reviewer_lifecycle', '004_pool_management'],
+          migrations: [
+            '001_init',
+            '002_review_lifecycle_parity',
+            '003_reviewer_lifecycle',
+            '004_pool_management',
+            '005_review_project_identity',
+          ],
           startupRecovery: {
             completedAt: expect.any(String),
             recoveredReviewerIds: [],
@@ -348,7 +354,7 @@ describe('review-broker-server end-to-end standalone parity', () => {
           reviewerStatusCounts: {},
           messageCount: 2,
           auditEventCount: 11,
-          migrationCount: 4,
+          migrationCount: 5,
           statusCounts: {
             closed: 1,
           },
@@ -416,7 +422,13 @@ describe('review-broker-server end-to-end standalone parity', () => {
     expect(startedEvent).toMatchObject({
       mode: 'once',
       dbPath: path.resolve(dbPath),
-      migrations: ['001_init', '002_review_lifecycle_parity', '003_reviewer_lifecycle', '004_pool_management'],
+      migrations: [
+        '001_init',
+        '002_review_lifecycle_parity',
+        '003_reviewer_lifecycle',
+        '004_pool_management',
+        '005_review_project_identity',
+      ],
     });
     expectStartupRecoverySnapshot(startedEvent.startupRecovery as BrokerStartupRecoverySnapshot, seeded);
     expect(completedEvent).toMatchObject({
@@ -429,7 +441,7 @@ describe('review-broker-server end-to-end standalone parity', () => {
       },
       messageCount: 1,
       auditEventCount: 14,
-      migrationCount: 4,
+      migrationCount: 5,
       statusCounts: {
         approved: 1,
         pending: 2,
@@ -621,7 +633,7 @@ describe('review-broker-server end-to-end standalone parity', () => {
       },
       messageCount: 1,
       auditEventCount: 14,
-      migrationCount: 4,
+      migrationCount: 5,
       statusCounts: {
         approved: 1,
         pending: 2,

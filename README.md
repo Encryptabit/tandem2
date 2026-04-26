@@ -58,8 +58,9 @@ Options:
   --busy-timeout-ms <ms>    SQLite busy_timeout pragma override
   --once                    Open the database, run migrations, report state, and exit
   --dashboard               Start the broker with the mounted dashboard HTTP server
-  --dashboard-port <port>   Dashboard HTTP port (default: 0 = OS-assigned)
+  --dashboard-port <port>   Dashboard HTTP port (default: 7331; use 0 for OS-assigned)
   --dashboard-host <host>   Dashboard HTTP bind address (default: 127.0.0.1)
+  --enable-standalone-pool  Let the dashboard process own reviewer pool scaling immediately
   -h, --help                Show help
 ```
 
@@ -88,6 +89,8 @@ The broker emits structured JSON events on stdout:
 
 The operator dashboard is a thin Astro-built client served directly from the broker process. It has three pages, each backed by broker-owned JSON API routes. All data comes from the broker's SQLite database — the dashboard never maintains its own state. By default, `tandem dashboard` opens a detected project-local Tandem extension database; if none is present, it opens the global Tandem broker database so one dashboard can show review activity from multiple projects.
 
+Dashboard mode is view-only by default: it does not run startup recovery, spawn reviewers, or scale the reviewer pool just because a `reviewer_pool` config exists. Use the Overview page's standalone pool toggle, or start with `--enable-standalone-pool`, when you intentionally want the dashboard process to own reviewer pool scaling.
+
 **Live updates** use SSE (Server-Sent Events) as a change notification signal. When the broker's state changes in the dashboard process, it pushes a lightweight event (topic + version number) over SSE. The reviews page also periodically refreshes so changes written by other project-local broker processes sharing the same global database appear without a manual reload. Snapshot routes are always authoritative.
 
 ### Pages
@@ -105,6 +108,8 @@ All routes are served from the broker process at the dashboard host/port.
 | Route | Description |
 |---|---|
 | `GET /api/overview` | Full overview snapshot (counts, reviewer state, recovery, latest activity) |
+| `GET /api/pool` | Current dashboard pool mode (`view_only`, `standalone`, or `unavailable`) |
+| `POST /api/pool` | Enable or disable dashboard-owned standalone pool scaling with `{ "enabled": boolean }` |
 | `GET /api/events` | SSE stream — heartbeat on connect, `change` events on broker mutations |
 | `GET /api/events/feed` | Paginated event list. Query params: `limit`, `before` (cursor), `eventType` |
 | `GET /api/reviews` | Review list. Query params: `status`, `limit` |
@@ -119,6 +124,7 @@ The MCP server exposes the full broker operation set over stdio transport:
 | `create_review` | Create a new review |
 | `list_reviews` | List reviews with optional filters |
 | `claim_review` | Claim a pending review for a reviewer |
+| `claim_next_pending_review` | Atomically claim the next pending review for a reviewer |
 | `reclaim_review` | Reclaim a review after reviewer failure |
 | `get_review_status` | Get review status and metadata |
 | `get_proposal` | Get the review proposal (diff, description) |

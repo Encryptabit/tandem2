@@ -233,6 +233,12 @@ export const ClaimReviewRequestSchema = z
   })
   .strict();
 
+export const ClaimNextPendingReviewRequestSchema = z
+  .object({
+    claimantId: ActorIdSchema,
+  })
+  .strict();
+
 export const ClaimReviewOutcomeSchema = z.enum(['claimed', 'stale', 'not_claimable']);
 
 export const ClaimReviewResponseSchema = z
@@ -409,6 +415,7 @@ export type ListReviewersResponse = z.infer<typeof ListReviewersResponseSchema>;
 export type KillReviewerRequest = z.infer<typeof KillReviewerRequestSchema>;
 export type KillReviewerResponse = z.infer<typeof KillReviewerResponseSchema>;
 export type ClaimReviewRequest = z.infer<typeof ClaimReviewRequestSchema>;
+export type ClaimNextPendingReviewRequest = z.infer<typeof ClaimNextPendingReviewRequestSchema>;
 export type ClaimReviewResponse = z.infer<typeof ClaimReviewResponseSchema>;
 export type GetReviewStatusRequest = z.infer<typeof GetReviewStatusRequestSchema>;
 export type GetReviewStatusResponse = z.infer<typeof GetReviewStatusResponseSchema>;

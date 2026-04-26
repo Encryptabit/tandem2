@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -31,6 +31,52 @@ function runTandemWithEnv(args: string[], env: NodeJS.ProcessEnv): ReturnType<ty
     cwd: WORKTREE_ROOT,
     encoding: 'utf8',
     env: { ...process.env, ...env },
+  });
+}
+
+function waitForDashboardUrl(child: ReturnType<typeof spawn>): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let buffer = '';
+    let stderr = '';
+
+    const timeout = setTimeout(() => {
+      reject(new Error(`Timed out waiting for dashboard URL. stderr: ${stderr}`));
+    }, 15_000);
+
+    child.stdout?.on('data', (chunk: Buffer) => {
+      buffer += chunk.toString('utf8');
+      const match = buffer.match(/Dashboard running at (http:\/\/127\.0\.0\.1:\d+)/);
+      if (match) {
+        clearTimeout(timeout);
+        resolve(match[1]!);
+      }
+    });
+
+    child.stderr?.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString('utf8');
+    });
+
+    child.on('error', (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+
+    child.on('exit', (code) => {
+      clearTimeout(timeout);
+      reject(new Error(`Dashboard exited with code ${code} before printing URL. stderr: ${stderr}`));
+    });
+  });
+}
+
+async function stopChild(child: ReturnType<typeof spawn>): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return;
+  }
+
+  child.kill('SIGTERM');
+  await new Promise<void>((resolve) => {
+    child.once('exit', () => resolve());
+    setTimeout(resolve, 3_000);
   });
 }
 
@@ -597,6 +643,7 @@ describe('tandem CLI smoke tests', () => {
       expect(result.status).toBe(0);
       const stdout = result.stdout as string;
       expect(stdout).toContain('reviews claim');
+      expect(stdout).toContain('reviews claim-next');
       expect(stdout).toContain('reviews verdict');
       expect(stdout).toContain('reviews close');
       expect(stdout).toContain('discussion add');
@@ -633,8 +680,180 @@ describe('tandem CLI smoke tests', () => {
       const stdout = result.stdout as string;
       expect(stdout).toContain('--port');
       expect(stdout).toContain('--host');
+      expect(stdout).toContain('--enable-standalone-pool');
       expect(stdout).toContain('local extension DB');
       expect(stdout).toContain('otherwise global');
+    });
+
+    it('starts in view-only pool mode by default and preserves tracked live reviewers', async () => {
+      const directory = mkdtempSync(path.join(os.tmpdir(), 'tandem-dashboard-view-only-'));
+      const localDbPath = path.join(directory, 'broker.sqlite');
+      const configPath = path.join(directory, 'config.json');
+      let child: ReturnType<typeof spawn> | null = null;
+
+      try {
+        writeFileSync(
+          configPath,
+          JSON.stringify(
+            {
+              reviewer_pool: {
+                max_pool_size: 3,
+                scaling_ratio: 1,
+                idle_timeout_seconds: 300,
+                max_ttl_seconds: 3600,
+                claim_timeout_seconds: 300,
+                spawn_cooldown_seconds: 1,
+                background_check_interval_seconds: 5,
+              },
+              reviewer: {
+                provider: 'fixture',
+                providers: {
+                  fixture: {
+                    command: process.execPath,
+                    args: [path.join(WORKTREE_ROOT, 'packages', 'review-broker-server', 'test', 'fixtures', 'reviewer-worker.mjs')],
+                  },
+                },
+              },
+            },
+            null,
+            2,
+          ) + '\n',
+        );
+
+        const seedContext = createAppContext({
+          cwd: WORKTREE_ROOT,
+          dbPath: localDbPath,
+        });
+        try {
+          const now = '2026-04-24T12:00:00.000Z';
+          seedContext.reviewers.recordSpawned({
+            reviewerId: 'live-dashboard-reviewer',
+            command: process.execPath,
+            args: ['fixture-worker.mjs'],
+            pid: 12345,
+            startedAt: now,
+            lastSeenAt: now,
+            sessionToken: 'external-gsd-session',
+            createdAt: now,
+            updatedAt: now,
+          });
+        } finally {
+          seedContext.close();
+        }
+
+        child = spawn(TSX_PATH, [TANDEM_CLI_PATH, 'dashboard', '--port', '0', '--db-path', localDbPath], {
+          cwd: WORKTREE_ROOT,
+          env: { ...process.env, REVIEW_BROKER_CONFIG_PATH: configPath },
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+
+        const baseUrl = await waitForDashboardUrl(child);
+        const poolRes = await fetch(`${baseUrl}/api/pool`);
+        expect(poolRes.status).toBe(200);
+        expect(await poolRes.json()).toMatchObject({
+          configured: true,
+          enabled: false,
+          mode: 'view_only',
+        });
+      } finally {
+        if (child) {
+          await stopChild(child);
+        }
+      }
+
+      const verification = createAppContext({
+        cwd: WORKTREE_ROOT,
+        dbPath: localDbPath,
+      });
+      try {
+        expect(verification.reviewers.getById('live-dashboard-reviewer')).toMatchObject({
+          pid: 12345,
+          offlineAt: null,
+        });
+        const lifecycleEvents = verification.db
+          .prepare<unknown[], { event_type: string }>(
+            `SELECT event_type FROM audit_events WHERE event_type IN ('reviewer.offline', 'pool.scale_up')`,
+          )
+          .all();
+        expect(lifecycleEvents).toHaveLength(0);
+      } finally {
+        verification.close();
+        rmSync(directory, { recursive: true, force: true });
+      }
+    });
+
+    it('exposes the standalone pool toggle API from tandem dashboard', async () => {
+      const directory = mkdtempSync(path.join(os.tmpdir(), 'tandem-dashboard-pool-toggle-'));
+      const localDbPath = path.join(directory, 'broker.sqlite');
+      const configPath = path.join(directory, 'config.json');
+      let child: ReturnType<typeof spawn> | null = null;
+
+      try {
+        writeFileSync(
+          configPath,
+          JSON.stringify(
+            {
+              reviewer_pool: {
+                max_pool_size: 3,
+                scaling_ratio: 1,
+                idle_timeout_seconds: 300,
+                max_ttl_seconds: 3600,
+                claim_timeout_seconds: 300,
+                spawn_cooldown_seconds: 1,
+                background_check_interval_seconds: 5,
+              },
+              reviewer: {
+                provider: 'fixture',
+                providers: {
+                  fixture: {
+                    command: process.execPath,
+                    args: [path.join(WORKTREE_ROOT, 'packages', 'review-broker-server', 'test', 'fixtures', 'reviewer-worker.mjs')],
+                  },
+                },
+              },
+            },
+            null,
+            2,
+          ) + '\n',
+        );
+
+        child = spawn(TSX_PATH, [TANDEM_CLI_PATH, 'dashboard', '--port', '0', '--db-path', localDbPath], {
+          cwd: WORKTREE_ROOT,
+          env: { ...process.env, REVIEW_BROKER_CONFIG_PATH: configPath },
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+
+        const baseUrl = await waitForDashboardUrl(child);
+        const enableRes = await fetch(`${baseUrl}/api/pool`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: true }),
+        });
+        expect(enableRes.status).toBe(200);
+        expect(await enableRes.json()).toMatchObject({
+          configured: true,
+          enabled: true,
+          mode: 'standalone',
+          sessionToken: expect.any(String),
+        });
+
+        const disableRes = await fetch(`${baseUrl}/api/pool`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: false }),
+        });
+        expect(disableRes.status).toBe(200);
+        expect(await disableRes.json()).toMatchObject({
+          configured: true,
+          enabled: false,
+          mode: 'view_only',
+        });
+      } finally {
+        if (child) {
+          await stopChild(child);
+        }
+        rmSync(directory, { recursive: true, force: true });
+      }
     });
   });
 
@@ -725,6 +944,62 @@ describe('tandem CLI smoke tests', () => {
       expect(output).toHaveProperty('outcome');
       expect(output.outcome).toBe('claimed');
       expect(output).toHaveProperty('version');
+    });
+
+    it('atomically claims the next pending review (JSON output)', async () => {
+      const directory = mkdtempSync(path.join(os.tmpdir(), 'tandem-cli-claim-next-'));
+      const localDbPath = path.join(directory, 'test.sqlite');
+      const context = createAppContext({
+        cwd: WORKTREE_ROOT,
+        dbPath: localDbPath,
+      });
+      const service = createBrokerService(context);
+
+      let localReviewId = '';
+      try {
+        const diff = readFileSync(
+          path.join(WORKTREE_ROOT, 'packages', 'review-broker-server', 'test', 'fixtures', 'valid-review.diff'),
+          'utf8',
+        );
+        const created = await service.createReview({
+          title: 'Claim next CLI review',
+          description: 'Claimed through the atomic next-pending command.',
+          diff,
+          authorId: 'claim-next-author',
+          priority: 'normal',
+        });
+        localReviewId = created.review.reviewId;
+      } finally {
+        context.close();
+      }
+
+      try {
+        const result = runTandem([
+          'reviews', 'claim-next', '--actor', 'claim-next-reviewer',
+          '--json', '--db-path', localDbPath,
+        ]);
+
+        expect(result.status).toBe(0);
+        const output = parseJsonOutput(result.stdout as string) as Record<string, unknown>;
+        expect(output.outcome).toBe('claimed');
+        expect(output.review).toMatchObject({
+          reviewId: localReviewId,
+          status: 'claimed',
+          claimedBy: 'claim-next-reviewer',
+        });
+
+        const noPending = runTandem([
+          'reviews', 'claim-next', '--actor', 'claim-next-reviewer-2',
+          '--json', '--db-path', localDbPath,
+        ]);
+        expect(noPending.status).toBe(0);
+        expect(parseJsonOutput(noPending.stdout as string)).toMatchObject({
+          outcome: 'not_claimable',
+          review: null,
+        });
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
     });
   });
 
@@ -1044,6 +1319,7 @@ describe('tandem CLI smoke tests', () => {
       list_reviewers: 'reviewers list',
       kill_reviewer: 'reviewers kill',
       claim_review: 'reviews claim',
+      claim_next_pending_review: 'reviews claim-next',
       get_review_status: 'reviews show',
       get_proposal: 'proposal show',
       reclaim_review: 'reviews reclaim',

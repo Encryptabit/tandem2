@@ -85,6 +85,17 @@ export const StartupRecoveryOverviewSchema = z
   })
   .strict();
 
+export const OverviewPoolStateSchema = z
+  .object({
+    configured: z.boolean(),
+    enabled: z.boolean(),
+    mode: z.enum(['unavailable', 'view_only', 'standalone']),
+    reason: z.string().min(1).nullable(),
+    sessionToken: z.string().min(1).nullable(),
+    lastSpawnAt: IsoDateTimeSchema.nullable(),
+  })
+  .strict();
+
 export const OverviewSnapshotSchema = z
   .object({
     snapshotVersion: z.number().int().nonnegative(),
@@ -95,6 +106,7 @@ export const OverviewSnapshotSchema = z
     latestReviewer: OverviewLatestReviewerSchema.nullable(),
     latestAudit: OverviewLatestAuditSchema.nullable(),
     startupRecovery: StartupRecoveryOverviewSchema,
+    pool: OverviewPoolStateSchema,
   })
   .strict();
 
@@ -240,6 +252,7 @@ export type OverviewLatestReview = z.infer<typeof OverviewLatestReviewSchema>;
 export type OverviewLatestReviewer = z.infer<typeof OverviewLatestReviewerSchema>;
 export type OverviewLatestAudit = z.infer<typeof OverviewLatestAuditSchema>;
 export type StartupRecoveryOverview = z.infer<typeof StartupRecoveryOverviewSchema>;
+export type OverviewPoolState = z.infer<typeof OverviewPoolStateSchema>;
 export type OverviewSnapshot = z.infer<typeof OverviewSnapshotSchema>;
 export type SSEChangePayload = z.infer<typeof SSEChangePayloadSchema>;
 export type SSEHeartbeatPayload = z.infer<typeof SSEHeartbeatPayloadSchema>;

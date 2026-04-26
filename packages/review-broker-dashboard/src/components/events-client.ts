@@ -30,6 +30,13 @@ interface EventFeedResponse {
   hasMore: boolean;
 }
 
+interface DashboardResetResult {
+  reviewsDeleted: number;
+  messagesDeleted: number;
+  eventsDeleted: number;
+  reviewersDeleted: number;
+}
+
 type ConnectionState = 'loading' | 'connected' | 'error' | 'reconnecting';
 
 type FilterGroup = 'all' | 'review' | 'reviewer';
@@ -57,6 +64,7 @@ let activeFilter: FilterGroup = 'all';
 const knownIds = new Set<number>();
 let eventSource: EventSource | null = null;
 let isFetching = false;
+let isClearingEvents = false;
 
 // ---------------------------------------------------------------------------
 // Connection state management
@@ -239,6 +247,9 @@ function renderFilterBar(): void {
         (f) =>
           `<button class="filter-chip${f.group === activeFilter ? ' active' : ''}" data-filter="${f.group}">${f.label}</button>`,
       ).join('')}
+      <button class="action-btn danger clear-events-btn" type="button" ${isClearingEvents ? 'disabled' : ''}>
+        ${isClearingEvents ? 'Clearing...' : 'Clear Events'}
+      </button>
       <span class="live-indicator" id="live-dot"><span class="pulse-dot"></span> Live</span>
     </div>`;
 }
@@ -322,12 +333,50 @@ function escapeHtml(text: string): string {
   return div.innerHTML;
 }
 
+async function clearEvents(): Promise<void> {
+  if (isClearingEvents) return;
+  const confirmed = window.confirm('Clear all event rows?');
+  if (!confirmed) return;
+
+  isClearingEvents = true;
+  renderFilterBar();
+
+  try {
+    const res = await fetch('/api/events/clear', { method: 'POST' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const result = (await res.json()) as DashboardResetResult;
+
+    events = [];
+    knownIds.clear();
+    hasMore = false;
+    oldestEventId = null;
+    lastRefreshAt = new Date();
+    setConnectionState('connected');
+    updateLastRefresh();
+    lastRefreshEl.title = `Cleared ${result.eventsDeleted} events`;
+    renderEventList();
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    setConnectionState('error');
+    window.alert(`Failed to clear events: ${message}`);
+  } finally {
+    isClearingEvents = false;
+    renderFilterBar();
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Boot
 // ---------------------------------------------------------------------------
 
 // Event delegation — single listeners on stable parent containers
 filterRoot.addEventListener('click', (e) => {
+  const clearBtn = (e.target as HTMLElement).closest<HTMLButtonElement>('.clear-events-btn');
+  if (clearBtn && !clearBtn.disabled) {
+    void clearEvents();
+    return;
+  }
+
   const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('.filter-chip');
   if (btn?.dataset.filter) setFilter(btn.dataset.filter as FilterGroup);
 });

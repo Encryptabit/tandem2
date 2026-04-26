@@ -513,6 +513,7 @@ describe('pool manager lifecycle', () => {
       list: vi.fn().mockReturnValue([]),
       countByStatus: vi.fn().mockReturnValue(0),
       updateState: vi.fn(),
+      claimNextPending: vi.fn(),
       recordVerdict: vi.fn(),
       recordCounterPatchDecision: vi.fn(),
       recordMessageActivity: vi.fn(),
@@ -610,6 +611,7 @@ describe('pool manager lifecycle', () => {
       list: vi.fn().mockReturnValue([]),
       countByStatus: vi.fn().mockReturnValue(3),
       updateState: vi.fn(),
+      claimNextPending: vi.fn(),
       recordVerdict: vi.fn(),
       recordCounterPatchDecision: vi.fn(),
       recordMessageActivity: vi.fn(),
@@ -657,7 +659,83 @@ describe('pool manager lifecycle', () => {
         metadata: expect.objectContaining({
           spawnCount: 3,
           pendingCount: 3,
+          initialPendingCount: 3,
+          reviewersConsidered: [],
         }),
+      }),
+    );
+  });
+
+  it('reactiveScale rechecks pending reviews before spawning', async () => {
+    const mockReviewerManager = {
+      spawnReviewer: vi.fn(),
+      stopReviewer: vi.fn(),
+      shutdown: vi.fn(),
+      inspect: vi.fn(),
+      isProcessAlive: vi.fn().mockReturnValue(false),
+      getTrackedReviewerIds: vi.fn().mockReturnValue([]),
+      setOfflineHandler: vi.fn(),
+      close: vi.fn(),
+    };
+
+    const mockReviewers = {
+      recordSpawned: vi.fn(),
+      recordSpawnFailure: vi.fn(),
+      markOffline: vi.fn(),
+      markDraining: vi.fn(),
+      touch: vi.fn(),
+      getById: vi.fn(),
+      list: vi.fn().mockReturnValue([]),
+    };
+
+    const mockReviews = {
+      insert: vi.fn(),
+      getById: vi.fn(),
+      list: vi.fn().mockReturnValue([]),
+      countByStatus: vi.fn().mockReturnValueOnce(1).mockReturnValueOnce(0),
+      updateState: vi.fn(),
+      claimNextPending: vi.fn(),
+      recordVerdict: vi.fn(),
+      recordCounterPatchDecision: vi.fn(),
+      recordMessageActivity: vi.fn(),
+      getCounterPatchDecision: vi.fn(),
+    };
+
+    const mockAudit = {
+      append: vi.fn(),
+      listForReview: vi.fn(),
+      listActivityForReview: vi.fn(),
+      getLatestForReview: vi.fn(),
+      listGlobal: vi.fn(),
+    };
+
+    const poolManager = createPoolManager({
+      reviewerManager: mockReviewerManager,
+      reviewers: mockReviewers,
+      reviews: mockReviews,
+      audit: mockAudit,
+      poolConfig: {
+        max_pool_size: 5,
+        idle_timeout_seconds: 300,
+        max_ttl_seconds: 3600,
+        claim_timeout_seconds: 1200,
+        spawn_cooldown_seconds: 10,
+        scaling_ratio: 1,
+        background_check_interval_seconds: 30,
+      },
+      notifications: { notify: vi.fn().mockReturnValue(0) },
+      spawnCommand: 'node',
+      spawnArgs: ['worker.js'],
+      now: () => '2026-03-26T00:00:00.000Z',
+    });
+
+    await poolManager.reactiveScale();
+
+    expect(mockReviews.countByStatus).toHaveBeenCalledTimes(2);
+    expect(mockReviewerManager.spawnReviewer).not.toHaveBeenCalled();
+    expect(mockAudit.append).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: 'pool.scale_up',
       }),
     );
   });
@@ -711,6 +789,7 @@ describe('pool manager lifecycle', () => {
       list: vi.fn().mockReturnValue([]),
       countByStatus: vi.fn().mockReturnValue(3),
       updateState: vi.fn(),
+      claimNextPending: vi.fn(),
       recordVerdict: vi.fn(),
       recordCounterPatchDecision: vi.fn(),
       recordMessageActivity: vi.fn(),
@@ -863,6 +942,7 @@ describe('pool manager lifecycle', () => {
       list: vi.fn().mockReturnValue([]),
       countByStatus: vi.fn().mockReturnValue(1),
       updateState: vi.fn(),
+      claimNextPending: vi.fn(),
       recordVerdict: vi.fn(),
       recordCounterPatchDecision: vi.fn(),
       recordMessageActivity: vi.fn(),
@@ -939,6 +1019,7 @@ describe('pool manager lifecycle', () => {
       list: vi.fn().mockReturnValue([]),
       countByStatus: vi.fn().mockReturnValue(0),
       updateState: vi.fn(),
+      claimNextPending: vi.fn(),
       recordVerdict: vi.fn(),
       recordCounterPatchDecision: vi.fn(),
       recordMessageActivity: vi.fn(),

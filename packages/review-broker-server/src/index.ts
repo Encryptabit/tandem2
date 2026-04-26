@@ -147,6 +147,15 @@ export interface PoolStartupRecoverySnapshot {
   scalingTriggered: boolean;
 }
 
+export interface BrokerPoolControlSnapshot {
+  configured: boolean;
+  enabled: boolean;
+  mode: 'unavailable' | 'view_only' | 'standalone';
+  reason: string | null;
+  sessionToken: string | null;
+  lastSpawnAt: string | null;
+}
+
 export interface StartedBrokerRuntime {
   context: AppContext;
   service: BrokerService;
@@ -157,6 +166,8 @@ export interface StartedBrokerRuntime {
   getShutdownSnapshot: () => BrokerShutdownSnapshot | null;
   getStartupRecoverySnapshot: () => BrokerStartupRecoverySnapshot;
   getPoolStartupRecoverySnapshot: () => PoolStartupRecoverySnapshot | null;
+  getPoolControlSnapshot: () => BrokerPoolControlSnapshot;
+  setStandalonePoolEnabled: (enabled: boolean) => Promise<BrokerPoolControlSnapshot>;
 }
 
 export function startBroker(options: StartBrokerOptions = {}): StartedBrokerRuntime {
@@ -172,6 +183,14 @@ export function startBroker(options: StartBrokerOptions = {}): StartedBrokerRunt
   let poolManager: PoolManager | null = null;
   let poolRecovery: PoolStartupRecoverySnapshot | null = null;
   if (options.enablePool !== false && context.poolConfig !== null) {
+    startStandalonePool();
+  }
+
+  function createConfiguredPoolManager(): PoolManager {
+    if (context.poolConfig === null) {
+      throw new Error(`Reviewer pool is unavailable because reviewer_pool config is not present in ${context.configPath}.`);
+    }
+
     const configuredProvider =
       options.poolSpawnCommand === undefined && options.poolSpawnArgs === undefined
         ? resolveSelectedReviewerProvider(context.configPath)
@@ -194,7 +213,7 @@ export function startBroker(options: StartBrokerOptions = {}): StartedBrokerRunt
       );
     }
 
-    poolManager = createPoolManager({
+    return createPoolManager({
       reviewerManager: context.reviewerManager,
       reviewers: context.reviewers,
       reviews: context.reviews,
@@ -207,7 +226,14 @@ export function startBroker(options: StartBrokerOptions = {}): StartedBrokerRunt
       ...(options.poolLogDir !== undefined ? { logDir: options.poolLogDir } : {}),
       ...(options.now !== undefined ? { now: options.now } : {}),
     });
+  }
 
+  function startStandalonePool(): PoolStartupRecoverySnapshot {
+    if (poolManager !== null) {
+      return poolRecovery ?? { terminatedReviewerIds: [], reclaimedReviewIds: [], scalingTriggered: false };
+    }
+
+    poolManager = createConfiguredPoolManager();
     // Wire pool manager into broker service for reactive scaling triggers
     service._setPoolManager(poolManager);
 
@@ -222,6 +248,55 @@ export function startBroker(options: StartBrokerOptions = {}): StartedBrokerRunt
     });
 
     poolManager.startBackgroundLoop();
+
+    return poolRecovery;
+  }
+
+  async function stopStandalonePool(): Promise<void> {
+    if (poolManager === null) {
+      service._setPoolManager(null);
+      return;
+    }
+
+    const manager = poolManager;
+    poolManager = null;
+    service._setPoolManager(null);
+    manager.stopBackgroundLoop();
+    await manager.shutdownAll();
+    context.notifications.notify('reviewer-state');
+  }
+
+  function getPoolControlSnapshot(): BrokerPoolControlSnapshot {
+    if (context.poolConfig === null) {
+      return {
+        configured: false,
+        enabled: false,
+        mode: 'unavailable',
+        reason: 'reviewer_pool config is not present.',
+        sessionToken: null,
+        lastSpawnAt: null,
+      };
+    }
+
+    if (poolManager === null) {
+      return {
+        configured: true,
+        enabled: false,
+        mode: 'view_only',
+        reason: 'Dashboard is observing broker state; standalone pool scaling is disabled.',
+        sessionToken: null,
+        lastSpawnAt: null,
+      };
+    }
+
+    return {
+      configured: true,
+      enabled: true,
+      mode: 'standalone',
+      reason: 'Standalone reviewer pool scaling is enabled in this broker runtime.',
+      sessionToken: poolManager.getSessionToken(),
+      lastSpawnAt: poolManager.getLastSpawnAt(),
+    };
   }
 
   let closed = false;
@@ -273,12 +348,24 @@ export function startBroker(options: StartBrokerOptions = {}): StartedBrokerRunt
     context,
     service,
     startedAt,
-    poolManager,
+    get poolManager() {
+      return poolManager;
+    },
     close,
     waitUntilStopped: () => stopped,
     getShutdownSnapshot: () => shutdownSnapshot,
     getStartupRecoverySnapshot: () => startupRecovery,
     getPoolStartupRecoverySnapshot: () => poolRecovery,
+    getPoolControlSnapshot,
+    setStandalonePoolEnabled: async (enabled) => {
+      if (enabled) {
+        startStandalonePool();
+      } else {
+        await stopStandalonePool();
+      }
+
+      return getPoolControlSnapshot();
+    },
   };
 }
 

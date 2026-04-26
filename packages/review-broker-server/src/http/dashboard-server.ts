@@ -5,6 +5,8 @@ import path from 'node:path';
 import type { DashboardRouteHandler } from './dashboard-routes.js';
 import { BrokerServiceError } from '../runtime/broker-service.js';
 
+export const DEFAULT_DASHBOARD_PORT = 7331;
+
 export interface DashboardServerOptions {
   /** Port to listen on. Defaults to 0 (OS-assigned). */
   port?: number;
@@ -66,6 +68,34 @@ export async function createDashboardServer(options: DashboardServerOptions): Pr
         return;
       }
 
+      if (pathname === '/api/reset' && req.method === 'POST') {
+        const result = await routes.resetAll();
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
+        res.end(JSON.stringify(result));
+        return;
+      }
+
+      if (pathname === '/api/pool' && req.method === 'GET') {
+        const result = routes.getPoolState();
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
+        res.end(JSON.stringify(result));
+        return;
+      }
+
+      if (pathname === '/api/pool' && req.method === 'POST') {
+        const body = await readJsonBody(req);
+        if (typeof body.enabled !== 'boolean') {
+          res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ error: 'Expected JSON body with boolean field: enabled' }));
+          return;
+        }
+
+        const result = await routes.setStandalonePoolEnabled(body.enabled);
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
+        res.end(JSON.stringify(result));
+        return;
+      }
+
       if (pathname === '/api/events' && req.method === 'GET') {
         res.writeHead(200, {
           'Content-Type': 'text/event-stream',
@@ -82,6 +112,13 @@ export async function createDashboardServer(options: DashboardServerOptions): Pr
         // Send initial heartbeat
         const heartbeat = JSON.stringify({ type: 'heartbeat', serverTime: new Date().toISOString() });
         res.write(`event: heartbeat\ndata: ${heartbeat}\n\n`);
+        return;
+      }
+
+      if (pathname === '/api/events/clear' && req.method === 'POST') {
+        const result = await routes.clearEvents();
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
+        res.end(JSON.stringify(result));
         return;
       }
 
@@ -124,6 +161,13 @@ export async function createDashboardServer(options: DashboardServerOptions): Pr
         }
 
         const result = await routes.getReviewList(listOptions);
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
+        res.end(JSON.stringify(result));
+        return;
+      }
+
+      if (pathname === '/api/reviews/clear' && req.method === 'POST') {
+        const result = await routes.clearReviews();
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
         res.end(JSON.stringify(result));
         return;
@@ -208,6 +252,26 @@ export async function createDashboardServer(options: DashboardServerOptions): Pr
       });
     },
   };
+}
+
+async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+  let raw = '';
+
+  for await (const chunk of req) {
+    raw += chunk.toString('utf8');
+    if (raw.length > 64 * 1024) {
+      throw new Error('Request body too large.');
+    }
+  }
+
+  if (raw.trim().length === 0) {
+    return {};
+  }
+
+  const parsed = JSON.parse(raw) as unknown;
+  return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+    ? (parsed as Record<string, unknown>)
+    : {};
 }
 
 async function serveStaticAsset(distPath: string, pathname: string, res: ServerResponse): Promise<void> {

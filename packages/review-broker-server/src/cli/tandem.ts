@@ -8,7 +8,7 @@ import { REVIEW_STATUSES, REVIEWER_STATUSES, REVIEW_VERDICTS } from 'review-brok
 import { inspectBrokerRuntime, startBroker, BrokerServiceError } from '../index.js';
 import type { StartedBrokerRuntime } from '../index.js';
 import { createDashboardRoutes } from '../http/dashboard-routes.js';
-import { createDashboardServer } from '../http/dashboard-server.js';
+import { DEFAULT_DASHBOARD_PORT, createDashboardServer } from '../http/dashboard-server.js';
 import { readConfig, resolveProvider, setConfigValue } from './config.js';
 import { formatDetail, formatJson, formatTable, formatStatusCounts } from './format.js';
 
@@ -624,10 +624,15 @@ async function handleDashboard(
   const args = [...rest];
   const portRaw = extractFlagWithEquals(args, '--port');
   const host = extractFlagWithEquals(args, '--host');
-  const port = portRaw !== undefined ? Number(portRaw) : undefined;
+  extractBooleanFlag(args, '--enable-standalone-pool');
+  const port = portRaw !== undefined ? Number(portRaw) : DEFAULT_DASHBOARD_PORT;
 
   if (port !== undefined && (!Number.isInteger(port) || port < 0)) {
     throw new Error(`Invalid --port value: "${portRaw}". Must be a non-negative integer.`);
+  }
+
+  if (args.length > 0) {
+    throw new Error(`Unknown dashboard option: ${args[0]}`);
   }
 
   const dashboardDistPath = resolveDashboardDistPath(runtime.context.workspaceRoot);
@@ -636,6 +641,8 @@ async function handleDashboard(
     context: runtime.context,
     service: runtime.service,
     startupRecoverySnapshot: runtime.getStartupRecoverySnapshot(),
+    getPoolControlSnapshot: runtime.getPoolControlSnapshot,
+    setStandalonePoolEnabled: runtime.setStandalonePoolEnabled,
   });
 
   const server = await createDashboardServer({
@@ -646,7 +653,9 @@ async function handleDashboard(
   });
 
   if (options.json) {
-    process.stdout.write(formatJson({ url: server.baseUrl, port: server.port, dashboardDistPath }) + '\n');
+    process.stdout.write(
+      formatJson({ url: server.baseUrl, port: server.port, dashboardDistPath, pool: runtime.getPoolControlSnapshot() }) + '\n',
+    );
   } else {
     process.stdout.write(`Dashboard running at ${server.baseUrl}\n`);
   }
@@ -724,6 +733,30 @@ async function handleReviewsClaim(
   const actor = requireFlag(args, '--actor', 'reviews claim');
 
   const response = await runtime.service.claimReview({ reviewId: id, claimantId: actor });
+
+  if (options.json) {
+    process.stdout.write(formatJson(response) + '\n');
+    return;
+  }
+
+  const output = formatDetail([
+    ['Outcome', response.outcome],
+    ['Review ID', response.review?.reviewId ?? '—'],
+    ['Status', response.review?.status ?? '—'],
+    ['Version', response.version],
+  ]);
+  process.stdout.write(output + '\n');
+}
+
+async function handleReviewsClaimNext(
+  rest: string[],
+  runtime: StartedBrokerRuntime,
+  options: GlobalOptions,
+): Promise<void> {
+  const args = [...rest];
+  const actor = requireFlag(args, '--actor', 'reviews claim-next');
+
+  const response = await runtime.service.claimNextPendingReview({ claimantId: actor });
 
   if (options.json) {
     process.stdout.write(formatJson(response) + '\n');
@@ -1083,6 +1116,15 @@ Options:
   --json           Output as JSON
   -h, --help       Show this help message
 `,
+  'reviews claim-next': `Usage: tandem reviews claim-next --actor <actorId> [options]
+
+Atomically claim the next pending review for yourself.
+
+Options:
+  --actor <id>     Actor performing the claim (required)
+  --json           Output as JSON
+  -h, --help       Show this help message
+`,
   'reviews reclaim': `Usage: tandem reviews reclaim <id> --actor <actorId> [options]
 
 Reclaim a review (force-reassign an in_review review).
@@ -1166,10 +1208,12 @@ Options:
 Start the broker dashboard HTTP server.
 
 Options:
-  --port <port>    HTTP port (default: 0 = OS-assigned)
+  --port <port>    HTTP port (default: ${DEFAULT_DASHBOARD_PORT}; use 0 for OS-assigned)
   --host <host>    HTTP host (default: 127.0.0.1)
+  --enable-standalone-pool
+                   Start dashboard-owned reviewer pool scaling immediately
   --db-path <path> Override database path; defaults to local extension DB when detected, otherwise global
-  --json           Output as JSON (prints { url, port, dashboardDistPath })
+  --json           Output as JSON (prints { url, port, dashboardDistPath, pool })
   -h, --help       Show this help message
 `,
 };
@@ -1212,6 +1256,9 @@ async function dispatch(
         case 'claim':
           await handleReviewsClaim(rest, runtime, options);
           return;
+        case 'claim-next':
+          await handleReviewsClaimNext(rest, runtime, options);
+          return;
         case 'reclaim':
           await handleReviewsReclaim(rest, runtime, options);
           return;
@@ -1223,7 +1270,7 @@ async function dispatch(
           return;
         default:
           process.stderr.write(
-            `Unknown reviews subcommand: ${verb ?? '(none)'}\n\nAvailable: list, show, create, claim, reclaim, verdict, close\n`,
+            `Unknown reviews subcommand: ${verb ?? '(none)'}\n\nAvailable: list, show, create, claim, claim-next, reclaim, verdict, close\n`,
           );
           process.exitCode = 1;
           return;
@@ -1335,6 +1382,7 @@ Commands:
   reviews show <id>        Show review details
   reviews create           Create a review from a diff file
   reviews claim <id>       Claim a review (--actor required)
+  reviews claim-next       Atomically claim the next pending review (--actor required)
   reviews reclaim <id>     Reclaim a review (--actor required)
   reviews verdict <id>     Submit verdict (--actor, --verdict, --reason required)
   reviews close <id>       Close a review (--actor required)
@@ -1394,14 +1442,15 @@ async function main(): Promise<void> {
   let runtime: StartedBrokerRuntime | undefined;
 
   try {
-    const isLongLivedBrokerCommand = noun === 'dashboard';
+    const dashboardArgs = noun === 'dashboard' ? (verb ? [verb, ...subcommandRest] : subcommandRest) : [];
+    const enableStandalonePool = dashboardArgs.includes('--enable-standalone-pool');
     runtime = startBroker({
       handleSignals: false,
       ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
       ...(options.dbPath !== undefined ? { dbPath: options.dbPath } : {}),
       ...(noun === 'dashboard' ? { preferLocalExtensionDb: true } : {}),
-      enablePool: isLongLivedBrokerCommand,
-      enableStartupRecovery: isLongLivedBrokerCommand,
+      enablePool: enableStandalonePool,
+      enableStartupRecovery: enableStandalonePool,
     });
 
     await dispatch(noun, verb, subcommandRest, runtime, options);

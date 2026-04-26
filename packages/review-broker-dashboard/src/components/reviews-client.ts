@@ -74,6 +74,24 @@ interface ReviewDetailResponse {
   activity: DashboardReviewActivityEntry[];
 }
 
+interface DashboardResetResult {
+  reviewsDeleted: number;
+  messagesDeleted: number;
+  eventsDeleted: number;
+  reviewersDeleted: number;
+}
+
+interface DiffFile {
+  id: string;
+  oldPath: string | null;
+  newPath: string | null;
+  displayName: string;
+  lines: string[];
+  additions: number;
+  deletions: number;
+  hunks: number;
+}
+
 type ConnectionState = 'loading' | 'connected' | 'error' | 'reconnecting';
 type StatusFilter = 'all' | 'pending' | 'claimed' | 'submitted' | 'approved' | 'closed' | 'changes_requested';
 
@@ -97,7 +115,9 @@ let lastRefreshAt: Date | null = null;
 let activeStatusFilter: StatusFilter = 'all';
 let eventSource: EventSource | null = null;
 let isFetching = false;
+let isClearingReviews = false;
 let refreshTimer: number | null = null;
+let selectedDiffFileId: string | null = null;
 
 const CROSS_PROCESS_REFRESH_MS = 10_000;
 
@@ -132,6 +152,7 @@ function navigateToDetail(reviewId: string): void {
   const url = new URL(window.location.href);
   url.searchParams.set('id', reviewId);
   history.pushState(null, '', url.toString());
+  selectedDiffFileId = null;
   fetchDetail(reviewId);
 }
 
@@ -140,6 +161,7 @@ function navigateToList(): void {
   url.searchParams.delete('id');
   history.pushState(null, '', url.toString());
   activeDetail = null;
+  selectedDiffFileId = null;
   renderListView();
 }
 
@@ -196,12 +218,24 @@ async function fetchDetail(reviewId: string, options: { showLoading?: boolean } 
     const res = await fetch(`/api/reviews/${encodeURIComponent(reviewId)}`);
     if (!res.ok) {
       if (res.status === 404) {
+        activeDetail = null;
+        selectedDiffFileId = null;
+
+        if (options.showLoading === false) {
+          const url = new URL(window.location.href);
+          url.searchParams.delete('id');
+          history.replaceState(null, '', url.toString());
+          reviews = [];
+          hasMore = false;
+          renderListView();
+          return;
+        }
+
         reviewsRoot.innerHTML = `
           <div class="error-state">
             Review not found: ${escapeHtml(reviewId)}
-            <div class="error-details"><a href="/reviews/" class="back-link">← Back to reviews</a></div>
+            <div class="error-details"><a href="/reviews/" class="back-link">Back to reviews</a></div>
           </div>`;
-        isFetching = false;
         return;
       }
       throw new Error(`HTTP ${res.status}`);
@@ -210,8 +244,19 @@ async function fetchDetail(reviewId: string, options: { showLoading?: boolean } 
     lastRefreshAt = new Date();
     setConnectionState('connected');
     updateLastRefresh();
+    const previousDetail = activeDetail;
+    const canPatchDetail =
+      options.showLoading === false &&
+      previousDetail?.review.reviewId === data.review.reviewId &&
+      document.getElementById('review-detail-view') !== null;
+
+    if (canPatchDetail) {
+      patchDetailView(data, previousDetail);
+    } else {
+      renderDetailView(data);
+    }
+
     activeDetail = data;
-    renderDetailView(data);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     setConnectionState('error');
@@ -258,6 +303,9 @@ function renderListView(): void {
   const filterBar = `
     <div class="status-filters">
       ${filterChips}
+      <button class="action-btn danger clear-reviews-btn" type="button" ${isClearingReviews ? 'disabled' : ''}>
+        ${isClearingReviews ? 'Clearing...' : 'Clear Reviews'}
+      </button>
       <span class="live-indicator" id="live-dot"><span class="pulse-dot"></span> Live</span>
     </div>`;
 
@@ -305,12 +353,56 @@ function renderReviewRow(review: DashboardReviewListItem): string {
 // ---------------------------------------------------------------------------
 
 function renderDetailView(detail: ReviewDetailResponse): void {
-  const { review, proposal, discussion, activity } = detail;
+  reviewsRoot.innerHTML = `
+    <div id="review-detail-view">
+      <div class="detail-action-row">
+        <a href="#" class="back-link" id="back-to-list">Back to reviews</a>
+        <button class="action-btn danger clear-reviews-btn" type="button" ${isClearingReviews ? 'disabled' : ''}>
+          ${isClearingReviews ? 'Clearing...' : 'Clear Reviews'}
+        </button>
+      </div>
+      <div id="review-detail-header">${renderDetailHeader(detail.review)}</div>
+      <div id="review-proposal-section">${renderProposalSection(detail.proposal)}</div>
+      <div id="review-discussion-section">${renderDiscussionSection(detail.discussion)}</div>
+      <div id="review-activity-section">${renderActivitySection(detail.activity)}</div>
+    </div>`;
+}
+
+function patchDetailView(next: ReviewDetailResponse, previous: ReviewDetailResponse): void {
+  updateSection('review-detail-header', renderDetailHeader(next.review));
+  updateSection('review-discussion-section', renderDiscussionSection(next.discussion));
+  updateSection('review-activity-section', renderActivitySection(next.activity));
+
+  if (
+    previous.proposal.title !== next.proposal.title ||
+    previous.proposal.description !== next.proposal.description ||
+    previous.proposal.affectedFiles.join('\n') !== next.proposal.affectedFiles.join('\n')
+  ) {
+    const proposalCopyRoot = document.getElementById('review-proposal-copy');
+    if (proposalCopyRoot) {
+      proposalCopyRoot.innerHTML = renderProposalCopy(next.proposal);
+    }
+  }
+
+  if (previous.proposal.diff !== next.proposal.diff) {
+    const diffRoot = document.getElementById('review-diff-root');
+    if (diffRoot) {
+      diffRoot.innerHTML = renderDiffBlock(next.proposal.diff);
+    }
+  }
+}
+
+function updateSection(id: string, html: string): void {
+  const root = document.getElementById(id);
+  if (root) {
+    root.innerHTML = html;
+  }
+}
+
+function renderDetailHeader(review: DashboardReviewListItem): string {
   const statusClass = review.status.replace(/_/g, '-');
 
-  const backLink = `<a href="#" class="back-link" id="back-to-list">← Back to reviews</a>`;
-
-  const header = `
+  return `
     <div class="detail-header">
       <span class="status-chip ${statusClass}"><span class="status-dot ${statusClass}"></span>${escapeHtml(review.status)}</span>
       <h2 class="detail-title">${escapeHtml(review.title)}</h2>
@@ -327,25 +419,34 @@ function renderDetailView(detail: ReviewDetailResponse): void {
         ${review.claimedBy ? `<span class="event-actor">Claimed by ${escapeHtml(review.claimedBy)} ${review.claimedAt ? formatRelativeTime(review.claimedAt) : ''}</span>` : ''}
       </div>
     </div>`;
+}
 
-  const proposalSection = `
+function renderProposalSection(proposal: ReviewProposalDetail): string {
+  return `
     <div class="detail-section">
       <h3 class="section-title">Proposal</h3>
       <div class="panel">
         <div class="panel-body">
-          <div class="proposal-title">${escapeHtml(proposal.title)}</div>
-          <div class="proposal-description">${escapeHtml(proposal.description)}</div>
-          ${proposal.affectedFiles.length > 0 ? `
-            <div class="affected-files">
-              <span class="detail-label">Affected files</span>
-              <ul>${proposal.affectedFiles.map((f) => `<li><code>${escapeHtml(f)}</code></li>`).join('')}</ul>
-            </div>` : ''}
-          ${renderDiffBlock(proposal.diff)}
+          <div id="review-proposal-copy">${renderProposalCopy(proposal)}</div>
+          <div id="review-diff-root">${renderDiffBlock(proposal.diff)}</div>
         </div>
       </div>
     </div>`;
+}
 
-  const discussionSection = `
+function renderProposalCopy(proposal: ReviewProposalDetail): string {
+  return `
+    <div class="proposal-title">${escapeHtml(proposal.title)}</div>
+    <div class="proposal-description">${escapeHtml(proposal.description)}</div>
+    ${proposal.affectedFiles.length > 0 ? `
+      <div class="affected-files">
+        <span class="detail-label">Affected files</span>
+        <ul>${proposal.affectedFiles.map((f) => `<li><code>${escapeHtml(f)}</code></li>`).join('')}</ul>
+      </div>` : ''}`;
+}
+
+function renderDiscussionSection(discussion: ReviewDiscussionMessage[]): string {
+  return `
     <div class="detail-section">
       <h3 class="section-title">Discussion <span class="panel-badge">${discussion.length}</span></h3>
       ${discussion.length === 0
@@ -353,8 +454,10 @@ function renderDetailView(detail: ReviewDetailResponse): void {
         : `<div class="panel"><div class="panel-body">${discussion.map(renderDiscussionEntry).join('')}</div></div>`
       }
     </div>`;
+}
 
-  const activitySection = `
+function renderActivitySection(activity: DashboardReviewActivityEntry[]): string {
+  return `
     <div class="detail-section">
       <h3 class="section-title">Activity <span class="panel-badge">${activity.length}</span></h3>
       ${activity.length === 0
@@ -362,13 +465,6 @@ function renderDetailView(detail: ReviewDetailResponse): void {
         : `<div class="panel"><div class="panel-body">${activity.map(renderActivityEntry).join('')}</div></div>`
       }
     </div>`;
-
-  reviewsRoot.innerHTML = `
-    ${backLink}
-    ${header}
-    ${proposalSection}
-    ${discussionSection}
-    ${activitySection}`;
 }
 
 function renderProjectBadge(review: Pick<DashboardReviewListItem, 'projectName'>): string {
@@ -377,18 +473,154 @@ function renderProjectBadge(review: Pick<DashboardReviewListItem, 'projectName'>
 }
 
 function renderDiffBlock(diff: string): string {
-  const normalized = diff.replace(/\r\n/g, '\n');
-  const lines = normalized.length > 0 ? normalized.split('\n') : [];
+  const files = parseDiffFiles(diff);
 
-  if (lines.length === 0) {
+  if (files.length === 0) {
+    selectedDiffFileId = null;
     return '<div class="diff-block diff-empty">No diff available.</div>';
   }
 
-  const renderedLines = lines
+  const selectedFile = selectActiveDiffFile(files);
+  const renderedLines = selectedFile.lines
     .map((line) => `<span class="diff-line ${getDiffLineClass(line)}">${escapeHtml(line)}</span>`)
     .join('');
 
-  return `<div class="diff-block" role="region" aria-label="Proposal unified diff"><code>${renderedLines}</code></div>`;
+  const fileButtons = files.map((file) => `
+    <button class="diff-file-button${file.id === selectedFile.id ? ' active' : ''}" type="button" data-diff-file-id="${escapeHtml(file.id)}">
+      <span class="diff-file-name">${escapeHtml(file.displayName)}</span>
+      <span class="diff-file-stats">+${file.additions} -${file.deletions}</span>
+    </button>
+  `).join('');
+
+  return `
+    <div class="diff-viewer">
+      <aside class="diff-file-list" aria-label="Changed files">
+        <div class="diff-file-list-header">${files.length} file${files.length === 1 ? '' : 's'}</div>
+        ${fileButtons}
+      </aside>
+      <div class="diff-current-file">
+        <div class="diff-current-file-header">
+          <span>${escapeHtml(selectedFile.displayName)}</span>
+          <span class="diff-file-stats">+${selectedFile.additions} -${selectedFile.deletions} · ${selectedFile.hunks} hunk${selectedFile.hunks === 1 ? '' : 's'}</span>
+        </div>
+        <div class="diff-block" role="region" aria-label="Proposal unified diff for ${escapeHtml(selectedFile.displayName)}">
+          <code>${renderedLines}</code>
+        </div>
+      </div>
+    </div>`;
+}
+
+function selectActiveDiffFile(files: DiffFile[]): DiffFile {
+  const selected = selectedDiffFileId ? files.find((file) => file.id === selectedDiffFileId) : undefined;
+  const fallback = files[0]!;
+  const active = selected ?? fallback;
+  selectedDiffFileId = active.id;
+  return active;
+}
+
+function parseDiffFiles(diff: string): DiffFile[] {
+  const normalized = diff.replace(/\r\n/g, '\n');
+  const lines = normalized.length > 0 ? normalized.split('\n') : [];
+  const files: DiffFile[] = [];
+  let current: DiffFile | null = null;
+
+  function startFile(firstLine: string | null): DiffFile {
+    const parsedPaths = firstLine ? parseDiffGitPaths(firstLine) : { oldPath: null, newPath: null };
+    return {
+      id: '',
+      oldPath: parsedPaths.oldPath,
+      newPath: parsedPaths.newPath,
+      displayName: '',
+      lines: firstLine ? [firstLine] : [],
+      additions: 0,
+      deletions: 0,
+      hunks: 0,
+    };
+  }
+
+  function finishFile(file: DiffFile): void {
+    if (file.lines.length === 0) return;
+    const index = files.length;
+    const displayName = buildDiffDisplayName(file, index);
+    files.push({
+      ...file,
+      id: `${index}:${displayName}`,
+      displayName,
+    });
+  }
+
+  for (const line of lines) {
+    if (line.startsWith('diff --git ')) {
+      if (current) finishFile(current);
+      current = startFile(line);
+      continue;
+    }
+
+    if (!current) {
+      current = startFile(null);
+    }
+
+    current.lines.push(line);
+
+    if (line.startsWith('--- ')) {
+      current.oldPath = parseDiffBoundaryPath(line);
+    } else if (line.startsWith('+++ ')) {
+      current.newPath = parseDiffBoundaryPath(line);
+    }
+
+    if (line.startsWith('@@')) {
+      current.hunks += 1;
+    } else if (line.startsWith('+') && !line.startsWith('+++ ')) {
+      current.additions += 1;
+    } else if (line.startsWith('-') && !line.startsWith('--- ')) {
+      current.deletions += 1;
+    }
+  }
+
+  if (current) finishFile(current);
+  return files;
+}
+
+function parseDiffGitPaths(line: string): { oldPath: string | null; newPath: string | null } {
+  const prefix = 'diff --git a/';
+  if (!line.startsWith(prefix)) {
+    return { oldPath: null, newPath: null };
+  }
+
+  const rest = line.slice(prefix.length);
+  const splitIndex = rest.indexOf(' b/');
+  if (splitIndex === -1) {
+    return { oldPath: null, newPath: null };
+  }
+
+  return {
+    oldPath: stripDiffPath(rest.slice(0, splitIndex)),
+    newPath: stripDiffPath(rest.slice(splitIndex + 3)),
+  };
+}
+
+function parseDiffBoundaryPath(line: string): string | null {
+  const raw = line.slice(4).split('\t')[0]?.trim() ?? '';
+  if (raw === '/dev/null' || raw.length === 0) {
+    return null;
+  }
+  return stripDiffPath(raw);
+}
+
+function stripDiffPath(rawPath: string): string {
+  const unquoted = rawPath.replace(/^"|"$/g, '');
+  if (unquoted.startsWith('a/') || unquoted.startsWith('b/')) {
+    return unquoted.slice(2);
+  }
+  return unquoted;
+}
+
+function buildDiffDisplayName(file: DiffFile, index: number): string {
+  if (file.oldPath && file.newPath && file.oldPath !== file.newPath) {
+    return `${file.oldPath} -> ${file.newPath}`;
+  }
+
+  return file.newPath ?? file.oldPath ?? `Diff ${index + 1}`;
 }
 
 function getDiffLineClass(line: string): string {
@@ -446,6 +678,49 @@ function renderActivityEntry(entry: DashboardReviewActivityEntry): string {
       </div>
       ${summaryPart}
     </div>`;
+}
+
+async function clearReviews(): Promise<void> {
+  if (isClearingReviews) return;
+  const confirmed = window.confirm('Clear all reviews, review discussion, and review activity?');
+  if (!confirmed) return;
+
+  isClearingReviews = true;
+  setClearReviewsButtonsDisabled(true);
+
+  try {
+    const res = await fetch('/api/reviews/clear', { method: 'POST' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const result = (await res.json()) as DashboardResetResult;
+
+    reviews = [];
+    hasMore = false;
+    activeDetail = null;
+    selectedDiffFileId = null;
+    lastRefreshAt = new Date();
+    setConnectionState('connected');
+    updateLastRefresh();
+    lastRefreshEl.title = `Cleared ${result.reviewsDeleted} reviews`;
+
+    const url = new URL(window.location.href);
+    url.searchParams.delete('id');
+    history.replaceState(null, '', url.toString());
+    renderListView();
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    setConnectionState('error');
+    window.alert(`Failed to clear reviews: ${message}`);
+  } finally {
+    isClearingReviews = false;
+    setClearReviewsButtonsDisabled(false);
+  }
+}
+
+function setClearReviewsButtonsDisabled(disabled: boolean): void {
+  document.querySelectorAll<HTMLButtonElement>('.clear-reviews-btn').forEach((button) => {
+    button.disabled = disabled;
+    button.textContent = disabled ? 'Clearing...' : 'Clear Reviews';
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -569,6 +844,24 @@ reviewsRoot.addEventListener('click', (e) => {
   const chip = target.closest<HTMLButtonElement>('.filter-chip');
   if (chip?.dataset.filter) {
     setStatusFilter(chip.dataset.filter as StatusFilter);
+    return;
+  }
+
+  const clearBtn = target.closest<HTMLButtonElement>('.clear-reviews-btn');
+  if (clearBtn && !clearBtn.disabled) {
+    void clearReviews();
+    return;
+  }
+
+  const diffFileBtn = target.closest<HTMLButtonElement>('.diff-file-button');
+  if (diffFileBtn?.dataset.diffFileId && !diffFileBtn.disabled) {
+    selectedDiffFileId = diffFileBtn.dataset.diffFileId;
+    if (activeDetail) {
+      const diffRoot = document.getElementById('review-diff-root');
+      if (diffRoot) {
+        diffRoot.innerHTML = renderDiffBlock(activeDetail.proposal.diff);
+      }
+    }
     return;
   }
 

@@ -11,6 +11,7 @@ import type {
   SSEChangePayload,
   OperatorEventEntry,
   EventFeedResponse,
+  OverviewPoolState,
   DashboardReviewListItem,
   ReviewListResponse,
   DashboardReviewActivityEntry,
@@ -19,12 +20,21 @@ import type {
 
 import type { AppContext } from '../runtime/app-context.js';
 import type {
+  BrokerPoolControlSnapshot,
   BrokerRuntimeSnapshot,
   BrokerStartupRecoverySnapshot,
 } from '../index.js';
 import { inspectBrokerRuntime } from '../index.js';
 import type { BrokerService } from '../runtime/broker-service.js';
 import type { AuditEventRecord } from '../db/audit-repository.js';
+import type { PoolManager } from '../runtime/reviewer-pool.js';
+
+export interface DashboardResetResult {
+  reviewsDeleted: number;
+  messagesDeleted: number;
+  eventsDeleted: number;
+  reviewersDeleted: number;
+}
 
 export interface DashboardRouteHandler {
   /** Return the current overview snapshot (broker-owned truth). */
@@ -35,6 +45,16 @@ export interface DashboardRouteHandler {
   getReviewList: (options: { status?: string; limit?: number }) => Promise<ReviewListResponse>;
   /** Return composite review detail: status + proposal + discussion + redacted activity. */
   getReviewDetail: (reviewId: string) => Promise<ReviewDetailResponse>;
+  /** Return dashboard standalone pool state. */
+  getPoolState: () => OverviewPoolState;
+  /** Enable or disable dashboard-owned standalone pool scaling. */
+  setStandalonePoolEnabled: (enabled: boolean) => Promise<OverviewPoolState>;
+  /** Clear global audit events. */
+  clearEvents: () => Promise<DashboardResetResult>;
+  /** Clear reviews and their dependent messages/activity. */
+  clearReviews: () => Promise<DashboardResetResult>;
+  /** Stop tracked reviewers and clear persisted broker runtime tables. */
+  resetAll: () => Promise<DashboardResetResult>;
   /** Register a broadcast callback for SSE push. */
   onBroadcast: (callback: (event: string, data: string) => void) => void;
   /** Stop listening for broker notifications. */
@@ -45,6 +65,9 @@ export interface DashboardRouteDependencies {
   context: AppContext;
   service: BrokerService;
   startupRecoverySnapshot: BrokerStartupRecoverySnapshot;
+  poolManager?: PoolManager | null;
+  getPoolControlSnapshot?: () => BrokerPoolControlSnapshot;
+  setStandalonePoolEnabled?: (enabled: boolean) => Promise<BrokerPoolControlSnapshot>;
   now?: () => string;
 }
 
@@ -57,11 +80,28 @@ export interface DashboardRouteDependencies {
  * SSE events are lightweight change notifications only — not durable state.
  */
 export function createDashboardRoutes(deps: DashboardRouteDependencies): DashboardRouteHandler {
-  const { context, service, startupRecoverySnapshot } = deps;
+  const { context, service } = deps;
+  let startupRecoverySnapshot = deps.startupRecoverySnapshot;
   const nowFactory = deps.now ?? (() => new Date().toISOString());
+  const poolManager = deps.poolManager ?? null;
 
   let snapshotVersion = 0;
   let broadcastFn: ((event: string, data: string) => void) | null = null;
+
+  const resetStatements = {
+    countReviews: context.db.prepare<unknown[], { count: number }>('SELECT COUNT(*) as count FROM reviews'),
+    countMessages: context.db.prepare<unknown[], { count: number }>('SELECT COUNT(*) as count FROM messages'),
+    countAuditEvents: context.db.prepare<unknown[], { count: number }>('SELECT COUNT(*) as count FROM audit_events'),
+    countReviewers: context.db.prepare<unknown[], { count: number }>('SELECT COUNT(*) as count FROM reviewers'),
+    deleteMessages: context.db.prepare('DELETE FROM messages'),
+    deleteAuditEvents: context.db.prepare('DELETE FROM audit_events'),
+    deleteReviews: context.db.prepare('DELETE FROM reviews'),
+    deleteReviewers: context.db.prepare('DELETE FROM reviewers'),
+    resetSequences: context.db.prepare(`
+      DELETE FROM sqlite_sequence
+      WHERE name IN ('messages', 'audit_events')
+    `),
+  };
 
   // Subscribe to broker notification bus and forward as SSE change signals
   const unsubscribers: Array<() => void> = [];
@@ -78,16 +118,7 @@ export function createDashboardRoutes(deps: DashboardRouteDependencies): Dashboa
         const currentVersion = context.notifications.currentVersion(topic);
         if (currentVersion > lastVersion) {
           lastVersion = currentVersion;
-          snapshotVersion += 1;
-
-          if (broadcastFn) {
-            const payload: SSEChangePayload = {
-              type: 'change',
-              topic,
-              version: currentVersion,
-            };
-            broadcastFn('change', JSON.stringify(payload));
-          }
+          broadcastChange(topic, currentVersion);
         }
       }, 250);
 
@@ -105,6 +136,7 @@ export function createDashboardRoutes(deps: DashboardRouteDependencies): Dashboa
     const latestReviewer = projectLatestReviewer(runtime);
     const latestAudit = projectLatestAudit(runtime);
     const startupRecovery = projectStartupRecovery(startupRecoverySnapshot);
+    const pool = projectPoolState(getPoolControlSnapshot());
 
     return {
       snapshotVersion,
@@ -115,6 +147,7 @@ export function createDashboardRoutes(deps: DashboardRouteDependencies): Dashboa
       latestReviewer,
       latestAudit,
       startupRecovery,
+      pool,
     };
   }
 
@@ -172,11 +205,158 @@ export function createDashboardRoutes(deps: DashboardRouteDependencies): Dashboa
     return { review, proposal, discussion, activity };
   }
 
+  function getPoolState(): OverviewPoolState {
+    return projectPoolState(getPoolControlSnapshot());
+  }
+
+  async function setStandalonePoolEnabled(enabled: boolean): Promise<OverviewPoolState> {
+    if (!deps.setStandalonePoolEnabled) {
+      if (enabled) {
+        throw new Error('Standalone pool control is unavailable for this dashboard runtime.');
+      }
+
+      return getPoolState();
+    }
+
+    const snapshot = await deps.setStandalonePoolEnabled(enabled);
+    notifyAllDashboardTopics();
+    broadcastChange('pool');
+    return projectPoolState(snapshot);
+  }
+
+  async function clearEvents(): Promise<DashboardResetResult> {
+    const before = getResetCounts();
+
+    context.db.transaction(() => {
+      resetStatements.deleteAuditEvents.run();
+      resetStatements.resetSequences.run();
+    })();
+
+    const result = buildResetResult(before, getResetCounts());
+    broadcastChange('events');
+    return result;
+  }
+
+  async function clearReviews(): Promise<DashboardResetResult> {
+    const before = getResetCounts();
+
+    context.db.transaction(() => {
+      resetStatements.deleteReviews.run();
+      resetStatements.resetSequences.run();
+    })();
+
+    notifyAllDashboardTopics();
+    broadcastChange('reviews');
+    return buildResetResult(before, getResetCounts());
+  }
+
+  async function resetAll(): Promise<DashboardResetResult> {
+    if (deps.setStandalonePoolEnabled) {
+      await deps.setStandalonePoolEnabled(false);
+    } else if (poolManager) {
+      poolManager.stopBackgroundLoop();
+      await poolManager.shutdownAll();
+    } else {
+      await context.reviewerManager.shutdown();
+    }
+
+    const before = getResetCounts();
+
+    context.db.transaction(() => {
+      resetStatements.deleteMessages.run();
+      resetStatements.deleteAuditEvents.run();
+      resetStatements.deleteReviews.run();
+      resetStatements.deleteReviewers.run();
+      resetStatements.resetSequences.run();
+    })();
+
+    startupRecoverySnapshot = createEmptyStartupRecoverySnapshot(nowFactory());
+    notifyAllDashboardTopics();
+    broadcastChange('reset');
+
+    if (!deps.setStandalonePoolEnabled && poolManager) {
+      poolManager.startBackgroundLoop();
+    }
+
+    return buildResetResult(before, getResetCounts());
+  }
+
+  function getResetCounts(): ResetTableCounts {
+    return {
+      reviews: resetStatements.countReviews.get()?.count ?? 0,
+      messages: resetStatements.countMessages.get()?.count ?? 0,
+      events: resetStatements.countAuditEvents.get()?.count ?? 0,
+      reviewers: resetStatements.countReviewers.get()?.count ?? 0,
+    };
+  }
+
+  function buildResetResult(before: ResetTableCounts, after: ResetTableCounts): DashboardResetResult {
+    return {
+      reviewsDeleted: Math.max(before.reviews - after.reviews, 0),
+      messagesDeleted: Math.max(before.messages - after.messages, 0),
+      eventsDeleted: Math.max(before.events - after.events, 0),
+      reviewersDeleted: Math.max(before.reviewers - after.reviewers, 0),
+    };
+  }
+
+  function notifyAllDashboardTopics(): void {
+    context.notifications.notify('reviews');
+    context.notifications.notify('review-status');
+    context.notifications.notify('review-queue');
+    context.notifications.notify('reviewer-state');
+  }
+
+  function broadcastChange(topic: string, version?: number): void {
+    snapshotVersion += 1;
+
+    if (!broadcastFn) {
+      return;
+    }
+
+    const payload: SSEChangePayload = {
+      type: 'change',
+      topic,
+      version: version ?? snapshotVersion,
+    };
+    broadcastFn('change', JSON.stringify(payload));
+  }
+
+  function getPoolControlSnapshot(): BrokerPoolControlSnapshot {
+    if (deps.getPoolControlSnapshot) {
+      return deps.getPoolControlSnapshot();
+    }
+
+    if (poolManager) {
+      return {
+        configured: true,
+        enabled: true,
+        mode: 'standalone',
+        reason: 'Standalone reviewer pool scaling is enabled in this broker runtime.',
+        sessionToken: poolManager.getSessionToken(),
+        lastSpawnAt: poolManager.getLastSpawnAt(),
+      };
+    }
+
+    return {
+      configured: false,
+      enabled: false,
+      mode: 'unavailable',
+      reason: 'Standalone pool control is unavailable for this dashboard runtime.',
+      sessionToken: null,
+      lastSpawnAt: null,
+    };
+  }
+
   return {
     getOverviewSnapshot,
     getEventFeed,
     getReviewList,
     getReviewDetail,
+    getPoolState,
+    setStandalonePoolEnabled,
+    clearEvents,
+    clearReviews,
+    resetAll,
     onBroadcast: (callback) => {
       broadcastFn = callback;
     },
@@ -188,6 +368,13 @@ export function createDashboardRoutes(deps: DashboardRouteDependencies): Dashboa
       broadcastFn = null;
     },
   };
+}
+
+interface ResetTableCounts {
+  reviews: number;
+  messages: number;
+  events: number;
+  reviewers: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -251,6 +438,17 @@ function projectLatestAudit(runtime: BrokerRuntimeSnapshot): OverviewLatestAudit
   };
 }
 
+function projectPoolState(pool: BrokerPoolControlSnapshot): OverviewPoolState {
+  return {
+    configured: pool.configured,
+    enabled: pool.enabled,
+    mode: pool.mode,
+    reason: pool.reason,
+    sessionToken: pool.sessionToken,
+    lastSpawnAt: pool.lastSpawnAt,
+  };
+}
+
 function projectStartupRecovery(snapshot: BrokerStartupRecoverySnapshot): StartupRecoveryOverview {
   return {
     completedAt: snapshot.completedAt,
@@ -258,6 +456,17 @@ function projectStartupRecovery(snapshot: BrokerStartupRecoverySnapshot): Startu
     reclaimedReviewCount: snapshot.reclaimedReviewIds.length,
     staleReviewCount: snapshot.staleReviewIds.length,
     unrecoverableReviewCount: snapshot.unrecoverableReviewIds.length,
+  };
+}
+
+function createEmptyStartupRecoverySnapshot(completedAt: string): BrokerStartupRecoverySnapshot {
+  return {
+    completedAt,
+    recoveredReviewerIds: [],
+    reclaimedReviewIds: [],
+    staleReviewIds: [],
+    unrecoverableReviewIds: [],
+    reviewers: [],
   };
 }
 
