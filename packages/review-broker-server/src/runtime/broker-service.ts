@@ -6,6 +6,7 @@ import {
   AcceptCounterPatchResponseSchema,
   AddMessageRequestSchema,
   AddMessageResponseSchema,
+  ClaimNextPendingReviewRequestSchema,
   ClaimReviewRequestSchema,
   ClaimReviewResponseSchema,
   CloseReviewRequestSchema,
@@ -40,6 +41,7 @@ import {
   type AcceptCounterPatchResponse,
   type AddMessageRequest,
   type AddMessageResponse,
+  type ClaimNextPendingReviewRequest,
   type ClaimReviewRequest,
   type ClaimReviewResponse,
   type CloseReviewRequest,
@@ -94,6 +96,7 @@ export type BrokerServiceErrorCode =
   | 'INVALID_COUNTER_PATCH_STATE'
   | 'INVALID_DIFF'
   | 'INVALID_REVIEW_TRANSITION'
+  | 'REVIEW_CLAIM_OWNERSHIP_MISMATCH'
   | 'REVIEW_NOT_FOUND'
   | 'STALE_CLAIM_GENERATION';
 
@@ -118,6 +121,7 @@ export interface BrokerService {
   spawnReviewer: (input: SpawnReviewerRequest) => Promise<SpawnReviewerResponse>;
   listReviewers: (input: ListReviewersRequest) => Promise<ListReviewersResponse>;
   killReviewer: (input: KillReviewerRequest) => Promise<KillReviewerResponse>;
+  claimNextPendingReview: (input: ClaimNextPendingReviewRequest) => Promise<ClaimReviewResponse>;
   claimReview: (input: ClaimReviewRequest) => Promise<ClaimReviewResponse>;
   getReviewStatus: (input: GetReviewStatusRequest) => Promise<GetReviewStatusResponse>;
   getProposal: (input: GetProposalRequest) => Promise<GetProposalResponse>;
@@ -130,7 +134,7 @@ export interface BrokerService {
   acceptCounterPatch: (input: AcceptCounterPatchRequest) => Promise<AcceptCounterPatchResponse>;
   rejectCounterPatch: (input: RejectCounterPatchRequest) => Promise<RejectCounterPatchResponse>;
   /** @internal Wire in pool manager for reactive scaling triggers. */
-  _setPoolManager: (poolManager: PoolManager) => void;
+  _setPoolManager: (poolManager: PoolManager | null) => void;
 }
 
 export interface CreateBrokerServiceOptions {
@@ -354,6 +358,55 @@ export function createBrokerService(context: AppContext, options: CreateBrokerSe
       });
     },
 
+    async claimNextPendingReview(input) {
+      const request = parseWithSchema(ClaimNextPendingReviewRequestSchema, input);
+      const claimedAt = now();
+      const updated = context.db.transaction(() => {
+        const review = context.reviews.claimNextPending({
+          claimantId: request.claimantId,
+          claimedAt,
+        });
+
+        if (!review) {
+          return null;
+        }
+
+        context.audit.append({
+          reviewId: review.reviewId,
+          eventType: 'review.claimed',
+          actorId: request.claimantId,
+          statusFrom: 'pending',
+          statusTo: 'claimed',
+          createdAt: claimedAt,
+          metadata: {
+            reviewId: review.reviewId,
+            outcome: 'claimed',
+            claimGeneration: review.claimGeneration,
+            summary: `Review claimed by ${request.claimantId}.`,
+          },
+        });
+
+        return review;
+      })();
+
+      if (!updated) {
+        return parseClaimResponse({
+          outcome: 'not_claimable',
+          review: null,
+          version: currentQueueVersion(context),
+          message: 'No pending reviews are claimable.',
+        });
+      }
+
+      const versions = notifyReviewMutation(context, updated.reviewId);
+      return parseClaimResponse({
+        outcome: 'claimed',
+        review: toReviewSummary(updated),
+        version: versions.queueVersion,
+        message: `Review ${updated.reviewId} claimed by ${request.claimantId}.`,
+      });
+    },
+
     async claimReview(input) {
       const request = parseWithSchema(ClaimReviewRequestSchema, input);
       const current = context.reviews.getById(request.reviewId);
@@ -379,6 +432,8 @@ export function createBrokerService(context: AppContext, options: CreateBrokerSe
             reviewId: current.reviewId,
             outcome: 'not_claimable',
             attemptedEvent: 'claim',
+            currentClaimedBy: current.claimedBy,
+            summary: buildClaimRejectionSummary(current, request.claimantId),
           },
           createdAt: now(),
         });
@@ -443,6 +498,11 @@ export function createBrokerService(context: AppContext, options: CreateBrokerSe
             attemptedEvent: 'claim',
             expectedClaimGeneration: current.claimGeneration,
             actualClaimGeneration: latest?.claimGeneration ?? null,
+            currentClaimedBy: latest?.claimedBy ?? null,
+            summary:
+              outcome === 'stale'
+                ? `Claim ignored; review ${request.reviewId} changed before ${request.claimantId} could claim it.`
+                : `Claim ignored; review ${request.reviewId} is no longer claimable by ${request.claimantId}.`,
           },
           createdAt: now(),
         });
@@ -594,6 +654,17 @@ export function createBrokerService(context: AppContext, options: CreateBrokerSe
       const request = parseWithSchema(SubmitVerdictRequestSchema, input);
       const current = ensureReviewExists(context, request.reviewId);
       const isChangesRequestedApproval = current.status === 'changes_requested' && request.verdict === 'approved';
+
+      if ((current.status === 'claimed' || current.status === 'submitted') && current.claimedBy !== request.actorId) {
+        ensureActiveClaimOwnedByActor({
+          context,
+          review: current,
+          actorId: request.actorId,
+          statusTo: request.verdict,
+          attemptedEvent: 'submit_verdict',
+          createdAt: now(),
+        });
+      }
 
       if (current.status !== 'claimed' && current.status !== 'submitted' && !isChangesRequestedApproval) {
         persistTransitionRejection({
@@ -806,6 +877,27 @@ export function createBrokerService(context: AppContext, options: CreateBrokerSe
       }
 
       const actorRole = getAuthorRole(current, request.actorId);
+      if (current.status === 'claimed' && request.actorId !== current.claimedBy) {
+        ensureActiveClaimOwnedByActor({
+          context,
+          review: current,
+          actorId: request.actorId,
+          statusTo: current.status,
+          attemptedEvent: 'add_message',
+          createdAt: now(),
+        });
+      }
+      if (current.status === 'submitted' && actorRole === 'reviewer' && current.claimedBy !== request.actorId) {
+        ensureActiveClaimOwnedByActor({
+          context,
+          review: current,
+          actorId: request.actorId,
+          statusTo: current.status,
+          attemptedEvent: 'add_message',
+          createdAt: now(),
+        });
+      }
+
       let validatedCounterPatch: { diff: string; affectedFiles: string[]; fileCount: number } | null = null;
 
       if (request.diff !== undefined) {
@@ -1078,7 +1170,7 @@ export function createBrokerService(context: AppContext, options: CreateBrokerSe
       });
     },
 
-    _setPoolManager(pm: PoolManager) {
+    _setPoolManager(pm: PoolManager | null) {
       poolManagerRef = pm;
     },
   };
@@ -1287,6 +1379,57 @@ function persistTransitionRejection(options: {
       metadata: options.metadata,
     });
   })();
+}
+
+function ensureActiveClaimOwnedByActor(options: {
+  context: AppContext;
+  review: ReviewRecord;
+  actorId: string;
+  statusTo: ReviewRecord['status'];
+  attemptedEvent: 'add_message' | 'submit_verdict';
+  createdAt: string;
+}): void {
+  if (options.review.claimedBy === options.actorId) {
+    return;
+  }
+
+  const expectedClaimedBy = options.review.claimedBy;
+  persistTransitionRejection({
+    context: options.context,
+    review: options.review,
+    actorId: options.actorId,
+    statusTo: options.statusTo,
+    errorCode: 'REVIEW_CLAIM_OWNERSHIP_MISMATCH',
+    createdAt: options.createdAt,
+    metadata: {
+      reviewId: options.review.reviewId,
+      attemptedEvent: options.attemptedEvent,
+      outcome: 'claim_owner_mismatch',
+      expectedClaimedBy,
+      actualActorId: options.actorId,
+      summary:
+        expectedClaimedBy === null
+          ? `Reviewer action ignored; review ${options.review.reviewId} has no active claimant.`
+          : `Reviewer action ignored; review ${options.review.reviewId} is claimed by ${expectedClaimedBy}, not ${options.actorId}.`,
+    },
+  });
+
+  throw new BrokerServiceError({
+    code: 'REVIEW_CLAIM_OWNERSHIP_MISMATCH',
+    reviewId: options.review.reviewId,
+    message:
+      expectedClaimedBy === null
+        ? `Review ${options.review.reviewId} has no active claimant for ${options.attemptedEvent}.`
+        : `Review ${options.review.reviewId} is claimed by ${expectedClaimedBy}, not ${options.actorId}.`,
+  });
+}
+
+function buildClaimRejectionSummary(review: ReviewRecord, claimantId: string): string {
+  if (review.status === 'claimed' && review.claimedBy) {
+    return `Claim ignored; review ${review.reviewId} is already claimed by ${review.claimedBy}.`;
+  }
+
+  return `Claim ignored; review ${review.reviewId} is not claimable from status ${review.status} by ${claimantId}.`;
 }
 
 function notifyReviewMutation(context: AppContext, reviewId: string): {

@@ -102,6 +102,11 @@ export interface UpdateReviewStateInput {
   affectedFiles?: string[];
 }
 
+export interface ClaimNextPendingReviewInput {
+  claimantId: string;
+  claimedAt: string;
+}
+
 export interface RecordVerdictInput {
   reviewId: string;
   updatedAt: string;
@@ -136,6 +141,7 @@ export interface ReviewsRepository {
   list: (options?: ListReviewsOptions) => ReviewSummary[];
   countByStatus: (status: ReviewStatus) => number;
   updateState: (input: UpdateReviewStateInput) => ReviewRecord | null;
+  claimNextPending: (input: ClaimNextPendingReviewInput) => ReviewRecord | null;
   recordVerdict: (input: RecordVerdictInput) => ReviewRecord | null;
   recordCounterPatchDecision: (input: RecordCounterPatchDecisionInput) => ReviewRecord | null;
   recordMessageActivity: (input: RecordMessageActivityInput) => ReviewRecord | null;
@@ -233,6 +239,27 @@ export function createReviewsRepository(db: Database.Database): ReviewsRepositor
 
   const countByStatusStatement = db.prepare<{ status: ReviewStatus }, { count: number }>(`
     SELECT COUNT(*) as count FROM reviews WHERE status = @status
+  `);
+
+  const claimNextPendingStatement = db.prepare<ClaimNextPendingReviewInput, ReviewRow>(`
+    UPDATE reviews
+    SET
+      status = 'claimed',
+      claimed_by = @claimantId,
+      claimed_at = @claimedAt,
+      claim_generation = claim_generation + 1,
+      updated_at = @claimedAt,
+      last_activity_at = @claimedAt
+    WHERE review_id = (
+      SELECT review_id
+      FROM reviews
+      WHERE status = 'pending'
+        AND claimed_by IS NULL
+      ORDER BY created_at DESC, review_id DESC
+      LIMIT 1
+    )
+    RETURNING
+      ${REVIEW_SELECT_COLUMNS}
   `);
 
   // Statement cache for dynamic SQL (updateAndReload, list) — avoids recompilation on every call
@@ -434,6 +461,11 @@ export function createReviewsRepository(db: Database.Database): ReviewsRepositor
 
     updateState(input) {
       return updateAndReload(input);
+    },
+
+    claimNextPending(input) {
+      const row = claimNextPendingStatement.get(input);
+      return row ? mapReviewRow(row) : null;
     },
 
     recordVerdict(input) {

@@ -283,13 +283,12 @@ async function runTandemJson(args) {
   return JSON.parse(text);
 }
 
-async function listPendingReviews() {
-  const response = await runTandemJson(['reviews', 'list', '--status', 'pending', '--limit', '10']);
-  return Array.isArray(response?.reviews) ? response.reviews : [];
-}
-
 async function claimReview(targetReviewId) {
   return await runTandemJson(['reviews', 'claim', targetReviewId, '--actor', reviewerId]);
+}
+
+async function claimNextReview() {
+  return await runTandemJson(['reviews', 'claim-next', '--actor', reviewerId]);
 }
 
 async function reclaimReview(targetReviewId) {
@@ -486,25 +485,8 @@ async function runCodexDecision(proposal) {
 }
 
 async function claimNextPendingReview() {
-  const pending = await listPendingReviews();
-
-  if (pending.length === 0) {
-    return null;
-  }
-
-  for (const review of pending) {
-    const targetReviewId = review?.reviewId;
-    if (!targetReviewId) {
-      continue;
-    }
-
-    const claim = await claimReview(targetReviewId);
-    if (claim?.outcome === 'claimed') {
-      return targetReviewId;
-    }
-  }
-
-  return null;
+  const claim = await claimNextReview();
+  return claim?.outcome === 'claimed' && claim.review?.reviewId ? claim.review.reviewId : null;
 }
 
 async function reviewClaimedReview(targetReviewId) {

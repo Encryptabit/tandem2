@@ -321,6 +321,9 @@ describe('review-broker-server dashboard mode', () => {
         url: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+$/),
         port: expect.any(Number),
         dashboardDistPath: expect.stringContaining('review-broker-dashboard/dist'),
+        pool: expect.objectContaining({
+          enabled: false,
+        }),
       });
 
       const baseUrl = dashboardReadyEvent.url as string;
@@ -333,6 +336,7 @@ describe('review-broker-server dashboard mode', () => {
         snapshotVersion: expect.any(Number),
         reviews: expect.objectContaining({ total: 0 }),
         reviewers: expect.objectContaining({ total: 0 }),
+        pool: expect.objectContaining({ enabled: false }),
       });
 
       // Verify the dashboard page is mounted

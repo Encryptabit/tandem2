@@ -8,6 +8,7 @@ import {
   OverviewLatestReviewerSchema,
   OverviewLatestAuditSchema,
   StartupRecoveryOverviewSchema,
+  OverviewPoolStateSchema,
   SSEChangePayloadSchema,
   SSEHeartbeatPayloadSchema,
   SSEEventPayloadSchema,
@@ -74,6 +75,14 @@ describe('dashboard transport contracts', () => {
         staleReviewCount: 0,
         unrecoverableReviewCount: 0,
       },
+      pool: {
+        configured: true,
+        enabled: true,
+        mode: 'standalone',
+        reason: 'Dashboard standalone pool is enabled.',
+        sessionToken: 'pool-session-001',
+        lastSpawnAt: '2026-03-20T18:59:30.000Z',
+      },
     });
 
     expect(snapshot.snapshotVersion).toBe(42);
@@ -99,6 +108,14 @@ describe('dashboard transport contracts', () => {
         staleReviewCount: 0,
         unrecoverableReviewCount: 0,
       },
+      pool: {
+        configured: false,
+        enabled: false,
+        mode: 'unavailable',
+        reason: 'reviewer_pool config is not present.',
+        sessionToken: null,
+        lastSpawnAt: null,
+      },
     });
 
     expect(snapshot.latestReview).toBeNull();
@@ -123,9 +140,34 @@ describe('dashboard transport contracts', () => {
           staleReviewCount: 0,
           unrecoverableReviewCount: 0,
         },
+        pool: {
+          configured: false,
+          enabled: false,
+          mode: 'unavailable',
+          reason: 'reviewer_pool config is not present.',
+          sessionToken: null,
+          lastSpawnAt: null,
+        },
         secretField: 'should-not-be-here',
       }),
     ).toThrow();
+  });
+
+  it('parses pool state modes for the overview', () => {
+    expect(
+      OverviewPoolStateSchema.parse({
+        configured: true,
+        enabled: false,
+        mode: 'view_only',
+        reason: 'Dashboard is observing an external reviewer pool.',
+        sessionToken: null,
+        lastSpawnAt: null,
+      }),
+    ).toMatchObject({
+      configured: true,
+      enabled: false,
+      mode: 'view_only',
+    });
   });
 
   it('rejects negative counts in review counts', () => {

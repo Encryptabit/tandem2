@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   OverviewSnapshotSchema,
+  OverviewPoolStateSchema,
   SSEChangePayloadSchema,
   SSEHeartbeatPayloadSchema,
 } from 'review-broker-core';
@@ -115,6 +116,84 @@ describe('http dashboard routes', () => {
         expect(parsed.latestReview?.status).toBe('pending');
         expect(parsed.latestAudit).not.toBeNull();
         expect(parsed.latestAudit?.eventType).toBe('review.created');
+      } finally {
+        routes.dispose();
+      }
+    } finally {
+      runtime.close();
+      await runtime.waitUntilStopped();
+    }
+  });
+
+  it('keeps dashboard pool view-only until standalone pool is explicitly enabled', async () => {
+    const dir = createTempDir();
+    const dbPath = path.join(dir, 'test.sqlite');
+    const configPath = path.join(dir, 'config.json');
+
+    writeFileSync(
+      configPath,
+      JSON.stringify(
+        {
+          reviewer_pool: {
+            max_pool_size: 3,
+            idle_timeout_seconds: 300,
+            max_ttl_seconds: 3600,
+            claim_timeout_seconds: 1200,
+            spawn_cooldown_seconds: 1,
+            scaling_ratio: 1,
+            background_check_interval_seconds: 60,
+          },
+        },
+        null,
+        2,
+      ),
+    );
+
+    const runtime = startBroker({
+      cwd: WORKTREE_ROOT,
+      dbPath,
+      env: { ...process.env, REVIEW_BROKER_CONFIG_PATH: configPath },
+      enablePool: false,
+      enableStartupRecovery: false,
+      handleSignals: false,
+      poolSpawnCommand: process.execPath,
+      poolSpawnArgs: [REVIEWER_FIXTURE_PATH],
+    });
+
+    try {
+      const routes = createDashboardRoutes({
+        context: runtime.context,
+        service: runtime.service,
+        startupRecoverySnapshot: runtime.getStartupRecoverySnapshot(),
+        getPoolControlSnapshot: runtime.getPoolControlSnapshot,
+        setStandalonePoolEnabled: runtime.setStandalonePoolEnabled,
+      });
+
+      try {
+        expect(OverviewPoolStateSchema.parse(routes.getPoolState())).toMatchObject({
+          configured: true,
+          enabled: false,
+          mode: 'view_only',
+        });
+        expect(runtime.poolManager).toBeNull();
+
+        const enabled = await routes.setStandalonePoolEnabled(true);
+        expect(enabled).toMatchObject({
+          configured: true,
+          enabled: true,
+          mode: 'standalone',
+          sessionToken: expect.any(String),
+        });
+        expect(runtime.poolManager).not.toBeNull();
+
+        const disabled = await routes.setStandalonePoolEnabled(false);
+        expect(disabled).toMatchObject({
+          configured: true,
+          enabled: false,
+          mode: 'view_only',
+          sessionToken: null,
+        });
+        expect(runtime.poolManager).toBeNull();
       } finally {
         routes.dispose();
       }
@@ -270,6 +349,166 @@ describe('http dashboard routes', () => {
         const body = await response.json();
         const parsed = OverviewSnapshotSchema.parse(body);
         expect(parsed.reviews.total).toBe(0);
+      } finally {
+        await server.close();
+        routes.dispose();
+      }
+    } finally {
+      runtime.close();
+      await runtime.waitUntilStopped();
+    }
+  });
+
+  it('serves standalone pool state and toggle over HTTP', async () => {
+    const dir = createTempDir();
+    const dbPath = path.join(dir, 'test.sqlite');
+    const configPath = path.join(dir, 'config.json');
+
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        reviewer_pool: {
+          max_pool_size: 3,
+          idle_timeout_seconds: 300,
+          max_ttl_seconds: 3600,
+          claim_timeout_seconds: 1200,
+          spawn_cooldown_seconds: 1,
+          scaling_ratio: 1,
+          background_check_interval_seconds: 60,
+        },
+      }),
+    );
+
+    const runtime = startBroker({
+      cwd: WORKTREE_ROOT,
+      dbPath,
+      env: { ...process.env, REVIEW_BROKER_CONFIG_PATH: configPath },
+      enablePool: false,
+      enableStartupRecovery: false,
+      handleSignals: false,
+      poolSpawnCommand: process.execPath,
+      poolSpawnArgs: [REVIEWER_FIXTURE_PATH],
+    });
+
+    try {
+      const routes = createDashboardRoutes({
+        context: runtime.context,
+        service: runtime.service,
+        startupRecoverySnapshot: runtime.getStartupRecoverySnapshot(),
+        getPoolControlSnapshot: runtime.getPoolControlSnapshot,
+        setStandalonePoolEnabled: runtime.setStandalonePoolEnabled,
+      });
+
+      const server = await createDashboardServer({
+        dashboardDistPath: dir,
+        routes,
+      });
+
+      try {
+        const initialRes = await fetch(`${server.baseUrl}/api/pool`);
+        expect(initialRes.status).toBe(200);
+        expect(OverviewPoolStateSchema.parse(await initialRes.json())).toMatchObject({
+          configured: true,
+          enabled: false,
+          mode: 'view_only',
+        });
+
+        const enableRes = await fetch(`${server.baseUrl}/api/pool`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: true }),
+        });
+        expect(enableRes.status).toBe(200);
+        expect(OverviewPoolStateSchema.parse(await enableRes.json())).toMatchObject({
+          enabled: true,
+          mode: 'standalone',
+        });
+      } finally {
+        await server.close();
+        routes.dispose();
+      }
+    } finally {
+      runtime.close();
+      await runtime.waitUntilStopped();
+    }
+  });
+
+  it('serves dashboard reset actions over HTTP', async () => {
+    const dir = createTempDir();
+    const dbPath = path.join(dir, 'test.sqlite');
+
+    const runtime = startBroker({
+      cwd: WORKTREE_ROOT,
+      dbPath,
+      handleSignals: false,
+    });
+
+    try {
+      const routes = createDashboardRoutes({
+        context: runtime.context,
+        service: runtime.service,
+        startupRecoverySnapshot: runtime.getStartupRecoverySnapshot(),
+      });
+
+      const server = await createDashboardServer({
+        dashboardDistPath: dir,
+        routes,
+      });
+
+      try {
+        await runtime.service.createReview({
+          title: 'Reset endpoint event test',
+          description: 'Seed an audit event while leaving the review intact.',
+          diff: readFixture('valid-review.diff'),
+          authorId: 'test-author',
+          priority: 'normal',
+        });
+
+        const clearEventsResponse = await fetch(`${server.baseUrl}/api/events/clear`, { method: 'POST' });
+        expect(clearEventsResponse.status).toBe(200);
+        const clearEventsBody = await clearEventsResponse.json() as { eventsDeleted: number; reviewsDeleted: number };
+        expect(clearEventsBody.eventsDeleted).toBeGreaterThan(0);
+        expect(clearEventsBody.reviewsDeleted).toBe(0);
+
+        const afterEventsClear = await fetch(`${server.baseUrl}/api/overview`).then((response) => response.json());
+        const parsedAfterEventsClear = OverviewSnapshotSchema.parse(afterEventsClear);
+        expect(parsedAfterEventsClear.reviews.total).toBe(1);
+        expect(parsedAfterEventsClear.latestAudit).toBeNull();
+
+        const clearReviewsResponse = await fetch(`${server.baseUrl}/api/reviews/clear`, { method: 'POST' });
+        expect(clearReviewsResponse.status).toBe(200);
+        const clearReviewsBody = await clearReviewsResponse.json() as { reviewsDeleted: number };
+        expect(clearReviewsBody.reviewsDeleted).toBe(1);
+
+        const reviewListAfterClear = await fetch(`${server.baseUrl}/api/reviews`).then((response) => response.json());
+        expect(reviewListAfterClear.reviews).toEqual([]);
+
+        await runtime.service.createReview({
+          title: 'Reset endpoint full test',
+          description: 'Seed data for a full reset.',
+          diff: readFixture('valid-review.diff'),
+          authorId: 'test-author',
+          priority: 'normal',
+        });
+        await runtime.service.spawnReviewer({
+          reviewerId: 'reset-test-reviewer',
+          command: process.execPath,
+          args: [REVIEWER_FIXTURE_PATH],
+          cwd: 'packages/review-broker-server',
+        });
+
+        const resetResponse = await fetch(`${server.baseUrl}/api/reset`, { method: 'POST' });
+        expect(resetResponse.status).toBe(200);
+        const resetBody = await resetResponse.json() as { reviewsDeleted: number; reviewersDeleted: number };
+        expect(resetBody.reviewsDeleted).toBe(1);
+        expect(resetBody.reviewersDeleted).toBe(1);
+
+        const afterFullReset = await fetch(`${server.baseUrl}/api/overview`).then((response) => response.json());
+        const parsedAfterFullReset = OverviewSnapshotSchema.parse(afterFullReset);
+        expect(parsedAfterFullReset.reviews.total).toBe(0);
+        expect(parsedAfterFullReset.reviewers.total).toBe(0);
+        expect(parsedAfterFullReset.latestAudit).toBeNull();
+        expect(parsedAfterFullReset.startupRecovery.recoveredReviewerCount).toBe(0);
       } finally {
         await server.close();
         routes.dispose();

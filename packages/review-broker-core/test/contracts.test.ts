@@ -5,6 +5,7 @@ import {
   AcceptCounterPatchResponseSchema,
   AddMessageRequestSchema,
   AddMessageResponseSchema,
+  ClaimNextPendingReviewRequestSchema,
   ClaimReviewRequestSchema,
   ClaimReviewResponseSchema,
   CloseReviewRequestSchema,
@@ -381,6 +382,7 @@ describe('review-broker-core contracts', () => {
       'listReviewers',
       'killReviewer',
       'claimReview',
+      'claimNextPendingReview',
       'getReviewStatus',
       'getProposal',
       'reclaimReview',
@@ -400,6 +402,7 @@ describe('review-broker-core contracts', () => {
       'list_reviewers',
       'kill_reviewer',
       'claim_review',
+      'claim_next_pending_review',
       'get_review_status',
       'get_proposal',
       'reclaim_review',
@@ -426,6 +429,13 @@ describe('review-broker-core contracts', () => {
 
     expect(getBrokerOperationByMethodName('claimReview').requestSchema).toBe(ClaimReviewRequestSchema);
     expect(getBrokerOperationByMethodName('claimReview').responseSchema).toBe(ClaimReviewResponseSchema);
+    expect(getBrokerOperationByMethodName('claimNextPendingReview').requestSchema).toBe(
+      ClaimNextPendingReviewRequestSchema,
+    );
+    expect(getBrokerOperationByMethodName('claimNextPendingReview').responseSchema).toBe(ClaimReviewResponseSchema);
+    expect(getBrokerOperationByMcpToolName('claim_next_pending_review')).toBe(
+      getBrokerOperationByMethodName('claimNextPendingReview'),
+    );
     expect(getBrokerOperationByMethodName('getReviewStatus').requestSchema).toBe(GetReviewStatusRequestSchema);
     expect(getBrokerOperationByMethodName('getReviewStatus').responseSchema).toBe(GetReviewStatusResponseSchema);
     expect(getBrokerOperationByMethodName('getProposal').requestSchema).toBe(GetProposalRequestSchema);

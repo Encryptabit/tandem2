@@ -62,6 +62,15 @@ interface StartupRecoveryOverview {
   unrecoverableReviewCount: number;
 }
 
+interface OverviewPoolState {
+  configured: boolean;
+  enabled: boolean;
+  mode: 'unavailable' | 'view_only' | 'standalone';
+  reason: string | null;
+  sessionToken: string | null;
+  lastSpawnAt: string | null;
+}
+
 interface OverviewSnapshot {
   snapshotVersion: number;
   generatedAt: string;
@@ -71,6 +80,14 @@ interface OverviewSnapshot {
   latestReviewer: OverviewLatestReviewer | null;
   latestAudit: OverviewLatestAudit | null;
   startupRecovery: StartupRecoveryOverview;
+  pool: OverviewPoolState;
+}
+
+interface DashboardResetResult {
+  reviewsDeleted: number;
+  messagesDeleted: number;
+  eventsDeleted: number;
+  reviewersDeleted: number;
 }
 
 type ConnectionState = 'loading' | 'connected' | 'error' | 'reconnecting';
@@ -92,6 +109,8 @@ let connectionState: ConnectionState = 'loading';
 let lastRefreshAt: Date | null = null;
 let lastError: string | null = null;
 let eventSource: EventSource | null = null;
+let isResetting = false;
+let isTogglingPool = false;
 
 // ---------------------------------------------------------------------------
 // Connection state management
@@ -177,11 +196,36 @@ function connectSSE(): void {
 
 function renderOverview(data: OverviewSnapshot): void {
   overviewRoot.innerHTML = `
+    ${renderOverviewActions(data)}
     ${renderCards(data)}
     ${renderReviewerPanel(data)}
     ${renderRecoveryPanel(data)}
     ${renderLatestActivityPanel(data)}
   `;
+}
+
+function renderOverviewActions(data: OverviewSnapshot): string {
+  const pool = data.pool;
+  const poolButtonLabel = isTogglingPool
+    ? 'Updating...'
+    : pool.enabled
+      ? 'Disable Standalone Pool'
+      : 'Enable Standalone Pool';
+  const poolMode = pool.mode === 'standalone' ? 'standalone pool' : pool.mode === 'view_only' ? 'view only' : 'unavailable';
+  const poolDisabled = isTogglingPool || !pool.configured;
+
+  return `
+    <div class="overview-actions">
+      <div class="pool-control">
+        <span class="pool-mode-badge ${pool.mode}">${poolMode}</span>
+        <button class="action-btn pool-toggle-btn ${pool.enabled ? 'active' : ''}" type="button" ${poolDisabled ? 'disabled' : ''}>
+          ${poolButtonLabel}
+        </button>
+      </div>
+      <button class="action-btn danger full-reset-btn" type="button" ${isResetting ? 'disabled' : ''}>
+        ${isResetting ? 'Resetting...' : 'Full Reset'}
+      </button>
+    </div>`;
 }
 
 function renderCards(data: OverviewSnapshot): string {
@@ -365,9 +409,76 @@ function escapeHtml(text: string): string {
   return div.innerHTML;
 }
 
+async function fullReset(): Promise<void> {
+  if (isResetting) return;
+  const confirmed = window.confirm('Full reset clears reviews, discussion, events, and reviewers. Continue?');
+  if (!confirmed) return;
+
+  isResetting = true;
+  if (currentSnapshot) {
+    renderOverview(currentSnapshot);
+  }
+
+  try {
+    const res = await fetch('/api/reset', { method: 'POST' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const result = (await res.json()) as DashboardResetResult;
+    lastRefreshEl.title = `Reset cleared ${result.reviewsDeleted} reviews, ${result.eventsDeleted} events, ${result.reviewersDeleted} reviewers`;
+    await fetchOverview();
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    setConnectionState('error', message);
+    window.alert(`Failed to reset broker: ${message}`);
+  } finally {
+    isResetting = false;
+    if (currentSnapshot) {
+      renderOverview(currentSnapshot);
+    }
+  }
+}
+
+async function toggleStandalonePool(): Promise<void> {
+  if (isTogglingPool || !currentSnapshot?.pool.configured) return;
+
+  isTogglingPool = true;
+  renderOverview(currentSnapshot);
+
+  try {
+    const res = await fetch('/api/pool', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: !currentSnapshot.pool.enabled }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    await fetchOverview();
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    setConnectionState('error', message);
+    window.alert(`Failed to update standalone pool: ${message}`);
+  } finally {
+    isTogglingPool = false;
+    if (currentSnapshot) {
+      renderOverview(currentSnapshot);
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Boot
 // ---------------------------------------------------------------------------
+
+overviewRoot.addEventListener('click', (e) => {
+  const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('.full-reset-btn');
+  if (btn && !btn.disabled) {
+    void fullReset();
+    return;
+  }
+
+  const poolBtn = (e.target as HTMLElement).closest<HTMLButtonElement>('.pool-toggle-btn');
+  if (poolBtn && !poolBtn.disabled) {
+    void toggleStandalonePool();
+  }
+});
 
 fetchOverview();
 connectSSE();

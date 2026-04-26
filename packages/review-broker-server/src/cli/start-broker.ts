@@ -5,12 +5,13 @@ import process from 'node:process';
 
 import { inspectBrokerRuntime, startBroker } from '../index.js';
 import { createDashboardRoutes } from '../http/dashboard-routes.js';
-import { createDashboardServer } from '../http/dashboard-server.js';
+import { DEFAULT_DASHBOARD_PORT, createDashboardServer } from '../http/dashboard-server.js';
 
 interface CliOptions {
   help: boolean;
   once: boolean;
   dashboard: boolean;
+  enableStandalonePool: boolean;
   dashboardPort?: number;
   dashboardHost?: string;
   cwd?: string;
@@ -31,6 +32,12 @@ async function main(): Promise<void> {
       ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
       ...(options.dbPath !== undefined ? { dbPath: options.dbPath } : {}),
       ...(options.busyTimeoutMs !== undefined ? { busyTimeoutMs: options.busyTimeoutMs } : {}),
+      ...(options.dashboard
+        ? {
+            enablePool: options.enableStandalonePool,
+            enableStartupRecovery: options.enableStandalonePool,
+          }
+        : {}),
     });
 
     const mode = options.once ? 'once' : options.dashboard ? 'dashboard' : 'serve';
@@ -46,6 +53,7 @@ async function main(): Promise<void> {
       pragmas: runtime.context.pragmas,
       migrations: runtime.context.appliedMigrations.map((migration) => migration.id),
       startupRecovery: runtime.getStartupRecoverySnapshot(),
+      pool: runtime.getPoolControlSnapshot(),
     });
 
     if (options.once) {
@@ -79,19 +87,22 @@ async function main(): Promise<void> {
         context: runtime.context,
         service: runtime.service,
         startupRecoverySnapshot: runtime.getStartupRecoverySnapshot(),
+        getPoolControlSnapshot: runtime.getPoolControlSnapshot,
+        setStandalonePoolEnabled: runtime.setStandalonePoolEnabled,
       });
 
       const server = await createDashboardServer({
         dashboardDistPath,
         routes,
         ...(options.dashboardHost !== undefined ? { host: options.dashboardHost } : {}),
-        ...(options.dashboardPort !== undefined ? { port: options.dashboardPort } : {}),
+        port: options.dashboardPort ?? DEFAULT_DASHBOARD_PORT,
       });
 
       emit('broker.dashboard_ready', {
         url: server.baseUrl,
         port: server.port,
         dashboardDistPath,
+        pool: runtime.getPoolControlSnapshot(),
       });
 
       // Gracefully tear down on broker stop
@@ -137,6 +148,7 @@ function parseCliArgs(argv: string[]): CliOptions {
     help: false,
     once: false,
     dashboard: false,
+    enableStandalonePool: false,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -158,6 +170,11 @@ function parseCliArgs(argv: string[]): CliOptions {
 
     if (argument === '--dashboard') {
       options.dashboard = true;
+      continue;
+    }
+
+    if (argument === '--enable-standalone-pool') {
+      options.enableStandalonePool = true;
       continue;
     }
 
@@ -254,7 +271,7 @@ function emit(event: string, payload: Record<string, unknown>, stream: 'stdout' 
 }
 
 function printUsage(): void {
-  process.stdout.write(`Usage: start-broker [options]\n\nOptions:\n  --db-path <path>          Override the SQLite database path\n  --cwd <path>              Resolve workspace-relative paths from this directory\n  --busy-timeout-ms <ms>    Override SQLite busy_timeout PRAGMA\n  --once                    Open, migrate, report state, and exit\n  --dashboard               Start the broker with the mounted dashboard HTTP server\n  --dashboard-port <port>   Dashboard HTTP port (default: 0 = OS-assigned)\n  --dashboard-host <host>   Dashboard HTTP host (default: 127.0.0.1)\n  -h, --help                Show this help message\n`);
+  process.stdout.write(`Usage: start-broker [options]\n\nOptions:\n  --db-path <path>              Override the SQLite database path\n  --cwd <path>                  Resolve workspace-relative paths from this directory\n  --busy-timeout-ms <ms>        Override SQLite busy_timeout PRAGMA\n  --once                        Open, migrate, report state, and exit\n  --dashboard                   Start the broker with the mounted dashboard HTTP server\n  --enable-standalone-pool      Allow dashboard runtime to own reviewer pool scaling\n  --dashboard-port <port>       Dashboard HTTP port (default: ${DEFAULT_DASHBOARD_PORT}; use 0 for OS-assigned)\n  --dashboard-host <host>       Dashboard HTTP host (default: 127.0.0.1)\n  -h, --help                    Show this help message\n`);
 }
 
 /**

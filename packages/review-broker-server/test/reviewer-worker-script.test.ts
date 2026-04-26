@@ -49,8 +49,7 @@ describe('reviewer worker script', () => {
 
     expect(commands).toEqual(
       expect.arrayContaining([
-        'reviews list',
-        'reviews claim',
+        'reviews claim-next',
         'proposal show',
         'discussion add',
         'reviews verdict',
@@ -443,13 +442,6 @@ function output(value) {
   process.exit(0);
 }
 
-if (args[0] === 'reviews' && args[1] === 'list') {
-  if (state.mode === 'queue' && state.status === 'pending' && !state.queueClaimed) {
-    output({ reviews: [{ reviewId: 'rvw_queue_1' }], version: 1 });
-  }
-  output({ reviews: [], version: 1 });
-}
-
 if (args[0] === 'reviews' && args[1] === 'claim') {
   const reviewId = args[2];
   if (reviewId === 'rvw_queue_1' && state.mode === 'queue' && state.status === 'pending' && !state.queueClaimed) {
@@ -463,6 +455,16 @@ if (args[0] === 'reviews' && args[1] === 'claim') {
     state.status = 'claimed';
     saveState();
     output({ outcome: 'claimed', review: { reviewId }, version: 2 });
+  }
+  output({ outcome: 'not_claimable', review: null, version: 2 });
+}
+
+if (args[0] === 'reviews' && args[1] === 'claim-next') {
+  if (state.mode === 'queue' && state.status === 'pending' && !state.queueClaimed) {
+    state.queueClaimed = true;
+    state.status = 'claimed';
+    saveState();
+    output({ outcome: 'claimed', review: { reviewId: 'rvw_queue_1' }, version: 2 });
   }
   output({ outcome: 'not_claimable', review: null, version: 2 });
 }

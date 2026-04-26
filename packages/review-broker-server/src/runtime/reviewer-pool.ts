@@ -43,6 +43,23 @@ export interface ComputeScalingDeltaResult {
   reason: string;
 }
 
+interface ScalingReviewerSnapshot {
+  reviewerId: string;
+  status: ReviewerRecord['status'];
+  currentReviewId: string | null;
+  pid: number | null;
+  sessionToken: string | null;
+  lastSeenAt: string | null;
+}
+
+interface ScalingSnapshot {
+  pendingCount: number;
+  activeCount: number;
+  drainingCount: number;
+  rapidExitCount: number;
+  reviewersConsidered: ScalingReviewerSnapshot[];
+}
+
 export function computeScalingDelta(input: ComputeScalingDeltaInput): ComputeScalingDeltaResult {
   const { pendingCount, activeCount, drainingCount, maxPoolSize, scalingRatio, lastSpawnAt, spawnCooldownSeconds, now } =
     input;
@@ -157,6 +174,51 @@ export function createPoolManager(options: CreatePoolManagerOptions): PoolManage
     });
   }
 
+  function collectScalingSnapshot(now: string): ScalingSnapshot {
+    const pendingCount = reviews.countByStatus('pending');
+    const allReviewers = reviewers.list();
+
+    let activeCount = 0;
+    let drainingCount = 0;
+    let rapidExitCount = 0;
+    const nowMs = Date.parse(now);
+    const windowMs = SPAWN_CIRCUIT_BREAKER_WINDOW_SECONDS * 1000;
+
+    for (const r of allReviewers) {
+      if (r.status === 'idle' || r.status === 'assigned') {
+        activeCount++;
+      } else if (r.status === 'draining') {
+        drainingCount++;
+      }
+
+      if (
+        r.sessionToken === sessionToken &&
+        r.offlineReason === 'reviewer_exit' &&
+        r.offlineAt !== null
+      ) {
+        const offlineMs = Date.parse(r.offlineAt);
+        if (Number.isFinite(offlineMs) && Number.isFinite(nowMs) && nowMs - offlineMs <= windowMs) {
+          rapidExitCount++;
+        }
+      }
+    }
+
+    return {
+      pendingCount,
+      activeCount,
+      drainingCount,
+      rapidExitCount,
+      reviewersConsidered: allReviewers.map((reviewer) => ({
+        reviewerId: reviewer.reviewerId,
+        status: reviewer.status,
+        currentReviewId: reviewer.currentReviewId,
+        pid: reviewer.pid,
+        sessionToken: reviewer.sessionToken,
+        lastSeenAt: reviewer.lastSeenAt,
+      })),
+    };
+  }
+
   async function reactiveScale(): Promise<void> {
     if (isScaling) {
       return;
@@ -165,35 +227,9 @@ export function createPoolManager(options: CreatePoolManagerOptions): PoolManage
     isScaling = true;
     try {
       const now = getNow();
-      const pendingCount = reviews.countByStatus('pending');
-      const allReviewers = reviewers.list();
+      const initialSnapshot = collectScalingSnapshot(now);
 
-      // Single-pass tallying over the reviewer list
-      let activeCount = 0;
-      let drainingCount = 0;
-      let rapidExitCount = 0;
-      const nowMs = Date.parse(now);
-      const windowMs = SPAWN_CIRCUIT_BREAKER_WINDOW_SECONDS * 1000;
-
-      for (const r of allReviewers) {
-        if (r.status === 'idle' || r.status === 'assigned') {
-          activeCount++;
-        } else if (r.status === 'draining') {
-          drainingCount++;
-        }
-        if (
-          r.sessionToken === sessionToken &&
-          r.offlineReason === 'reviewer_exit' &&
-          r.offlineAt !== null
-        ) {
-          const offlineMs = Date.parse(r.offlineAt);
-          if (Number.isFinite(offlineMs) && Number.isFinite(nowMs) && nowMs - offlineMs <= windowMs) {
-            rapidExitCount++;
-          }
-        }
-      }
-
-      maybeOpenSpawnCircuit(rapidExitCount, now);
+      maybeOpenSpawnCircuit(initialSnapshot.rapidExitCount, now);
 
       if (isSpawnPaused(now)) {
         return;
@@ -204,10 +240,10 @@ export function createPoolManager(options: CreatePoolManagerOptions): PoolManage
         spawnPausedUntil = null;
       }
 
-      const result = computeScalingDelta({
-        pendingCount,
-        activeCount,
-        drainingCount,
+      const initialResult = computeScalingDelta({
+        pendingCount: initialSnapshot.pendingCount,
+        activeCount: initialSnapshot.activeCount,
+        drainingCount: initialSnapshot.drainingCount,
         maxPoolSize: poolConfig.max_pool_size,
         scalingRatio: poolConfig.scaling_ratio,
         lastSpawnAt,
@@ -215,7 +251,24 @@ export function createPoolManager(options: CreatePoolManagerOptions): PoolManage
         now,
       });
 
-      if (result.spawnCount > 0) {
+      if (initialResult.spawnCount > 0) {
+        const recheckNow = getNow();
+        const recheckSnapshot = collectScalingSnapshot(recheckNow);
+        const result = computeScalingDelta({
+          pendingCount: recheckSnapshot.pendingCount,
+          activeCount: recheckSnapshot.activeCount,
+          drainingCount: recheckSnapshot.drainingCount,
+          maxPoolSize: poolConfig.max_pool_size,
+          scalingRatio: poolConfig.scaling_ratio,
+          lastSpawnAt,
+          spawnCooldownSeconds: poolConfig.spawn_cooldown_seconds,
+          now: recheckNow,
+        });
+
+        if (result.spawnCount <= 0) {
+          return;
+        }
+
         await Promise.all(
           Array.from({ length: result.spawnCount }, () =>
             reviewerManager.spawnReviewer({
@@ -234,13 +287,17 @@ export function createPoolManager(options: CreatePoolManagerOptions): PoolManage
           createdAt: lastSpawnAt,
           metadata: {
             spawnCount: result.spawnCount,
-            pendingCount,
-            activeCount,
-            drainingCount,
-            rapidExitCount,
-            desired: Math.ceil(pendingCount / poolConfig.scaling_ratio),
+            pendingCount: recheckSnapshot.pendingCount,
+            activeCount: recheckSnapshot.activeCount,
+            drainingCount: recheckSnapshot.drainingCount,
+            rapidExitCount: recheckSnapshot.rapidExitCount,
+            desired: Math.ceil(recheckSnapshot.pendingCount / poolConfig.scaling_ratio),
+            initialPendingCount: initialSnapshot.pendingCount,
+            initialActiveCount: initialSnapshot.activeCount,
+            initialDrainingCount: initialSnapshot.drainingCount,
+            reviewersConsidered: recheckSnapshot.reviewersConsidered,
             sessionToken,
-            summary: `Pool scaled up: spawned ${result.spawnCount} reviewer(s) (${pendingCount} pending, ${activeCount} active, ${drainingCount} draining).`,
+            summary: `Pool scaled up: spawned ${result.spawnCount} reviewer(s) (${recheckSnapshot.pendingCount} pending, ${recheckSnapshot.activeCount} active, ${recheckSnapshot.drainingCount} draining).`,
           },
         });
 
