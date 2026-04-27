@@ -6,13 +6,27 @@ import { installTandemReviewExtension } from '../dist/install.js';
 function printHelp() {
   process.stdout.write(`Usage: tandem-review-install [options]
 
-Install the Tandem review extension entrypoint into a project and bootstrap
-.gsd/review-broker/config.json defaults.
+Install the Tandem review extension entrypoint and bootstrap its review-broker
+config defaults.
+
+Modes:
+  Project (default)        Drops .gsd/extensions/tandem-review.mjs into --cwd
+                           and creates .gsd/review-broker/config.json defaults.
+  Global (--global)        Drops a tandem-review/ directory into the user-level
+                           pi extensions root (default: ~/.pi/agent/extensions/).
+                           No project config is bootstrapped — the extension
+                           creates .gsd/review-broker/config.json at runtime
+                           against whichever project loads it.
 
 Options:
-  --cwd <path>             Project root (default: current working directory)
-  --extension-path <path>  Override extension file path
-  --force                  Overwrite extension file if it already exists
+  --cwd <path>             Project root for project installs (default: cwd)
+  --extension-path <path>  Override the extension target.
+                             Project mode: file path (default tandem-review.mjs)
+                             Global mode:  directory path (default tandem-review/)
+  --global                 Install into the global pi user-extensions directory
+  --pi-home <path>         Override the pi home root used to derive the default
+                             global install path (default: $PI_HOME or ~/.pi)
+  --force                  Overwrite the extension entrypoint if it differs
   --json                   Print machine-readable JSON result
   -h, --help               Show this help message
 `);
@@ -22,6 +36,8 @@ function parseArgs(argv) {
   const parsed = {
     cwd: undefined,
     extensionPath: undefined,
+    global: false,
+    piHome: undefined,
     force: false,
     json: false,
     help: false,
@@ -42,6 +58,11 @@ function parseArgs(argv) {
 
     if (arg === '--force') {
       parsed.force = true;
+      continue;
+    }
+
+    if (arg === '--global') {
+      parsed.global = true;
       continue;
     }
 
@@ -80,6 +101,21 @@ function parseArgs(argv) {
       continue;
     }
 
+    if (arg === '--pi-home') {
+      const value = argv[i + 1];
+      if (!value || value.startsWith('--')) {
+        throw new Error('Missing value for --pi-home.');
+      }
+      parsed.piHome = value;
+      i += 1;
+      continue;
+    }
+
+    if (arg.startsWith('--pi-home=')) {
+      parsed.piHome = arg.slice('--pi-home='.length);
+      continue;
+    }
+
     throw new Error(`Unknown argument: ${arg}`);
   }
 
@@ -97,19 +133,35 @@ try {
   const result = installTandemReviewExtension({
     ...(args.cwd ? { projectRoot: args.cwd } : {}),
     ...(args.extensionPath ? { extensionPath: args.extensionPath } : {}),
+    ...(args.global ? { global: true } : {}),
+    ...(args.piHome ? { globalPiHome: args.piHome } : {}),
     ...(args.force ? { force: true } : {}),
   });
 
   if (args.json) {
     process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+  } else if (result.scope === 'global') {
+    process.stdout.write(
+      [
+        `Installed tandem review extension (global) at ${result.extensionPath}`,
+        result.manifestPath ? `Manifest at ${result.manifestPath}` : null,
+        result.packageJsonPath ? `Package metadata at ${result.packageJsonPath}` : null,
+        `Extension created=${result.extensionCreated} updated=${result.extensionUpdated}`,
+        'Project review-broker config will be created on first run.',
+      ]
+        .filter((line) => line !== null)
+        .join('\n') + '\n',
+    );
   } else {
     process.stdout.write(
       [
         `Installed tandem review extension at ${result.extensionPath}`,
-        `Config defaults ready at ${result.configPath}`,
+        result.configPath ? `Config defaults ready at ${result.configPath}` : null,
         `Extension created=${result.extensionCreated} updated=${result.extensionUpdated}`,
         `Config created=${result.configCreated} updated=${result.configUpdated}`,
-      ].join('\n') + '\n',
+      ]
+        .filter((line) => line !== null)
+        .join('\n') + '\n',
     );
   }
 } catch (error) {

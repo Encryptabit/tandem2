@@ -278,17 +278,30 @@ Lifecycle:
 ### Install
 
 ```bash
-# From a project where you want the gate active
+# Project install — drops the gate into one project
 npx tandem-review-install --cwd .
+
+# Global install — drops the gate into the user-level pi extensions dir,
+# so every project that pi loads picks it up automatically.
+npx tandem-review-install --global
 
 # Then start gsd-2 auto-mode as usual; the extension hooks in automatically.
 ```
 
-`tandem-review-install`:
+**Project mode** (default):
 
 - Drops `.gsd/extensions/tandem-review.mjs` (the entrypoint that wires `createTandemReviewExtension` to `createBrokerTransportAdapter`).
 - Bootstraps `.gsd/review-broker/config.json` with default `reviewer.providers.codex` and `reviewer_pool` settings.
 - Resolves the `reviewer-worker.mjs` path against the installed `tandem2` package so pooled reviewers can be spawned without further configuration.
+
+**Global mode** (`--global`):
+
+- Writes a `tandem-review/` directory under the pi user-extensions root (default `~/.pi/agent/extensions/tandem-review/`; override with `--pi-home <path>` or `$PI_HOME`).
+- The directory contains `index.js` (entrypoint), `package.json` (`{ "type": "module" }`), and `extension-manifest.json` so pi's loader can discover and register the extension.
+- The `index.js` imports from absolute `file://` URLs that are baked at install time. This means `review-broker-extension` and `review-broker-client` do **not** need to be on the runtime module-resolution path of the projects that load the extension — but they must remain installed at the location resolved when you ran the installer. If you move or reinstall those packages, re-run `tandem-review-install --global --force` to refresh the baked paths.
+- No project-local config is bootstrapped; the extension creates `.gsd/review-broker/config.json` at runtime against whichever project loads it.
+
+Both modes accept `--extension-path <path>` to override the install target (a file path in project mode, a directory path in global mode), and `--force` to overwrite an existing entrypoint.
 
 ### Environment variables (extension entrypoint)
 
