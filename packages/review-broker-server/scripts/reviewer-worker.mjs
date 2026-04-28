@@ -55,10 +55,14 @@ function parsePositiveInteger(rawValue, fallback) {
 }
 
 function parseFallbackVerdict(rawValue) {
-  if (rawValue === 'changes_requested') {
-    return 'changes_requested';
+  // Fail closed by default: any infrastructure error in the model invocation
+  // produces changes_requested so the proposer is blocked instead of silently
+  // approved. Set REVIEWER_FALLBACK_VERDICT=approved to opt into the loose
+  // behavior (e.g. for environments with throwaway test reviews).
+  if (rawValue === 'approved') {
+    return 'approved';
   }
-  return 'approved';
+  return 'changes_requested';
 }
 
 function parseAnalysisProvider(rawValue) {
@@ -454,6 +458,7 @@ async function runCodexDecision(proposal) {
     '--ask-for-approval',
     'never',
     'exec',
+    '--skip-git-repo-check',
     '--ephemeral',
     '--sandbox',
     'read-only',

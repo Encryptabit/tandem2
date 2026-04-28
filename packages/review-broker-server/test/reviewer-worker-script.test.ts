@@ -136,6 +136,7 @@ describe('reviewer worker script', () => {
       '--ask-for-approval',
       'never',
       'exec',
+      '--skip-git-repo-check',
       '--ephemeral',
       '--sandbox',
       'read-only',
@@ -192,7 +193,7 @@ describe('reviewer worker script', () => {
     expect(tandemEntries.some((entry) => entry.args[0] === 'reviews' && entry.args[1] === 'reclaim')).toBe(false);
 
     const state = JSON.parse(readFileSync(harness.statePath, 'utf8')) as { status: string };
-    expect(state.status).toBe('approved');
+    expect(state.status).toBe('changes_requested');
   });
 
   it('model failure fallback does not echo the full proposal prompt into the verdict reason', async () => {
@@ -267,7 +268,7 @@ describe('reviewer worker script', () => {
     expect(verdictEntries[1]!.args[fallbackReasonIndex + 1]).toContain('Automated reviewer fallback');
 
     const state = JSON.parse(readFileSync(harness.statePath, 'utf8')) as { status: string };
-    expect(state.status).toBe('approved');
+    expect(state.status).toBe('changes_requested');
   });
 
   it('queue mode reclaims and exits when fallback verdict submission also fails', async () => {
