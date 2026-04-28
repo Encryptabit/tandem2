@@ -1,5 +1,5 @@
 {
-  "name": "review-broker-extension",
+  "name": "@carithecoder/review-broker-extension",
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -21,8 +21,8 @@
     "build": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "review-broker-client": "workspace:*",
-    "review-broker-core": "workspace:*"
+    "@carithecoder/review-broker-client": "workspace:*",
+    "@carithecoder/review-broker-core": "workspace:*"
   },
   "pi": {
     "extensions": ["./dist/index.js"]

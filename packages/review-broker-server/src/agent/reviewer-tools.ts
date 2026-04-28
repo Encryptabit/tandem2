@@ -1,5 +1,5 @@
-import { Type, StringEnum } from '@gsd/pi-ai';
-import type { AgentTool, AgentToolResult } from '@gsd/pi-agent-core';
+import { Type, StringEnum } from '@mariozechner/pi-ai';
+import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
 
 import type { BrokerService } from '../runtime/broker-service.js';
 
@@ -33,7 +33,7 @@ export function createReviewerAgentTools(
       ),
     }),
     label: 'List Reviews',
-    async execute(_toolCallId, params) {
+    async execute(_toolCallId, params: any) {
       const result = await brokerService.listReviews(params);
       return textResult(result);
     },
@@ -47,7 +47,7 @@ export function createReviewerAgentTools(
       reviewId: Type.String({ description: 'The ID of the review to claim' }),
     }),
     label: 'Claim Review',
-    async execute(_toolCallId, params) {
+    async execute(_toolCallId, params: any) {
       const result = await brokerService.claimReview({
         reviewId: params.reviewId,
         claimantId: reviewerId,
@@ -64,7 +64,7 @@ export function createReviewerAgentTools(
       reviewId: Type.String({ description: 'The ID of the review to get the proposal for' }),
     }),
     label: 'Get Proposal',
-    async execute(_toolCallId, params) {
+    async execute(_toolCallId, params: any) {
       const result = await brokerService.getProposal({ reviewId: params.reviewId });
       return textResult(result);
     },
@@ -78,7 +78,7 @@ export function createReviewerAgentTools(
       reviewId: Type.String({ description: 'The ID of the review to check' }),
     }),
     label: 'Get Review Status',
-    async execute(_toolCallId, params) {
+    async execute(_toolCallId, params: any) {
       const result = await brokerService.getReviewStatus({ reviewId: params.reviewId });
       return textResult(result);
     },
@@ -92,7 +92,7 @@ export function createReviewerAgentTools(
       reviewId: Type.String({ description: 'The ID of the review to get discussion for' }),
     }),
     label: 'Get Discussion',
-    async execute(_toolCallId, params) {
+    async execute(_toolCallId, params: any) {
       const result = await brokerService.getDiscussion({ reviewId: params.reviewId });
       return textResult(result);
     },
@@ -110,7 +110,7 @@ export function createReviewerAgentTools(
       reason: Type.String({ description: 'Detailed explanation of your verdict — what you found, why you made this decision, and any specific issues or strengths' }),
     }),
     label: 'Submit Verdict',
-    async execute(_toolCallId, params) {
+    async execute(_toolCallId, params: any) {
       const result = await brokerService.submitVerdict({
         reviewId: params.reviewId,
         actorId: reviewerId,
@@ -130,7 +130,7 @@ export function createReviewerAgentTools(
       body: Type.String({ description: 'The message content — specific feedback, questions, or comments about the code changes' }),
     }),
     label: 'Add Message',
-    async execute(_toolCallId, params) {
+    async execute(_toolCallId, params: any) {
       const result = await brokerService.addMessage({
         reviewId: params.reviewId,
         actorId: reviewerId,

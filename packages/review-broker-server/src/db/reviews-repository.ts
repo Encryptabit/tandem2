@@ -8,7 +8,7 @@ import {
   type ReviewStatus,
   type ReviewSummary,
   type ReviewVerdict,
-} from 'review-broker-core';
+} from '@carithecoder/review-broker-core';
 
 interface ReviewRow {
   review_id: string;

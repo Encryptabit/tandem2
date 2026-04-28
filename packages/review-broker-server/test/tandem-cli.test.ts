@@ -9,7 +9,7 @@ import { createAppContext } from '../src/runtime/app-context.js';
 import { createBrokerService } from '../src/runtime/broker-service.js';
 import { setConfigValue } from '../src/cli/config.js';
 
-import { BROKER_OPERATIONS, BROKER_OPERATION_MCP_TOOL_NAMES } from 'review-broker-core';
+import { BROKER_OPERATIONS, BROKER_OPERATION_MCP_TOOL_NAMES } from '@carithecoder/review-broker-core';
 
 import { TANDEM_CLI_PATH, TSX_PATH, WORKTREE_ROOT } from './test-paths.js';
 

@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   EventFeedResponseSchema,
   OperatorEventEntrySchema,
-} from 'review-broker-core';
+} from '@carithecoder/review-broker-core';
 
 import { startBroker } from '../src/index.js';
 import { createDashboardRoutes } from '../src/http/dashboard-routes.js';

@@ -66,7 +66,7 @@ function resolveModuleEntry(specifier: string): string | null {
 function resolveDefaultWorkerScriptPath(): string {
   const candidates: string[] = [];
 
-  const clientEntryPath = resolveModuleEntry('review-broker-client');
+  const clientEntryPath = resolveModuleEntry('@carithecoder/review-broker-client');
   if (clientEntryPath) {
     const clientPackageDir = path.dirname(path.dirname(realpathSync(clientEntryPath)));
     candidates.push(
@@ -74,7 +74,7 @@ function resolveDefaultWorkerScriptPath(): string {
     );
   }
 
-  const serverEntryPath = resolveModuleEntry('tandem2');
+  const serverEntryPath = resolveModuleEntry('@carithecoder/tandem');
   if (serverEntryPath) {
     const serverPackageDir = path.dirname(path.dirname(realpathSync(serverEntryPath)));
     candidates.push(path.join(serverPackageDir, 'scripts', 'reviewer-worker.mjs'));

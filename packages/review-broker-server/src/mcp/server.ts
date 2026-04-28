@@ -1,6 +1,6 @@
 import { McpServer, type RegisteredTool } from '@modelcontextprotocol/sdk/server/mcp.js';
 
-import { BROKER_OPERATIONS } from 'review-broker-core';
+import { BROKER_OPERATIONS } from '@carithecoder/review-broker-core';
 
 import type { BrokerService } from '../runtime/broker-service.js';
 import { dispatchBrokerMcpTool } from './tool-dispatch.js';

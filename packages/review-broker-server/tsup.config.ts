@@ -18,7 +18,7 @@ export default defineConfig([
     sourcemap: !isProd,
     minify: isProd,
     dts: false,
-    external: ['review-broker-core', '@gsd/pi-agent-core', '@gsd/pi-ai'],
+    external: ['@carithecoder/review-broker-core', '@mariozechner/pi-agent-core', '@mariozechner/pi-ai'],
   },
   {
     entry: { index: 'src/index.ts' },
@@ -30,6 +30,6 @@ export default defineConfig([
     sourcemap: !isProd,
     minify: isProd,
     dts: false,
-    external: ['review-broker-core', '@gsd/pi-agent-core', '@gsd/pi-ai'],
+    external: ['@carithecoder/review-broker-core', '@mariozechner/pi-agent-core', '@mariozechner/pi-ai'],
   },
 ]);

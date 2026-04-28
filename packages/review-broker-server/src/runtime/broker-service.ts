@@ -80,7 +80,7 @@ import {
   type SpawnReviewerResponse,
   type SubmitVerdictRequest,
   type SubmitVerdictResponse,
-} from 'review-broker-core';
+} from '@carithecoder/review-broker-core';
 
 import type { StoredReviewMessage } from '../db/messages-repository.js';
 import type { AppContext } from './app-context.js';

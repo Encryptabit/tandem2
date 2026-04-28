@@ -11,7 +11,7 @@
 
 import { randomUUID } from 'node:crypto';
 
-import type { ReviewerRecord } from 'review-broker-core';
+import type { ReviewerRecord } from '@carithecoder/review-broker-core';
 
 import type { AuditRepository } from '../db/audit-repository.js';
 import type { ReviewersRepository } from '../db/reviewers-repository.js';

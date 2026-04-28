@@ -22,6 +22,7 @@ async function main(): Promise<void> {
     }
 
     const runtime = startBroker({
+      seedGlobalConfig: true,
       ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
       ...(options.dbPath !== undefined ? { dbPath: options.dbPath } : {}),
       ...(options.busyTimeoutMs !== undefined ? { busyTimeoutMs: options.busyTimeoutMs } : {}),

@@ -4,10 +4,18 @@ import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { ZERO_USAGE } from '@gsd/pi-agent-core';
-import type { StreamFn } from '@gsd/pi-agent-core';
-import { AssistantMessageEventStream } from '@gsd/pi-ai';
-import type { AssistantMessage, Context } from '@gsd/pi-ai';
+import type { StreamFn } from '@mariozechner/pi-agent-core';
+import { AssistantMessageEventStream } from '@mariozechner/pi-ai';
+import type { AssistantMessage, Context } from '@mariozechner/pi-ai';
+
+const ZERO_USAGE = {
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  totalTokens: 0,
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+} as const;
 
 import type { AppContext } from '../src/runtime/app-context.js';
 import { createAppContext } from '../src/runtime/app-context.js';

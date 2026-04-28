@@ -5,7 +5,7 @@ import {
   type BrokerOperationMethodName,
   type BrokerOperationRequest,
   type BrokerOperationResponse,
-} from 'review-broker-core';
+} from '@carithecoder/review-broker-core';
 
 export type BrokerClient = {
   [TMethodName in BrokerOperationMethodName]: (

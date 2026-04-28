@@ -29,6 +29,7 @@ async function main(): Promise<void> {
 
   try {
     const runtime = startBroker({
+      seedGlobalConfig: true,
       ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
       ...(options.dbPath !== undefined ? { dbPath: options.dbPath } : {}),
       ...(options.busyTimeoutMs !== undefined ? { busyTimeoutMs: options.busyTimeoutMs } : {}),
@@ -42,6 +43,13 @@ async function main(): Promise<void> {
 
     const mode = options.once ? 'once' : options.dashboard ? 'dashboard' : 'serve';
 
+    if (runtime.context.globalConfigSeed.seeded) {
+      emit('broker.global_config_seeded', {
+        globalConfigPath: runtime.context.globalConfigSeed.globalConfigPath,
+        workerScriptPath: runtime.context.globalConfigSeed.workerScriptPath,
+      });
+    }
+
     emit('broker.started', {
       startedAt: runtime.startedAt,
       mode,
@@ -50,6 +58,7 @@ async function main(): Promise<void> {
       workspaceRoot: runtime.context.workspaceRoot,
       configPath: runtime.context.configPath,
       configPathSource: runtime.context.configPathSource,
+      globalConfigPath: runtime.context.globalConfigPath,
       pragmas: runtime.context.pragmas,
       migrations: runtime.context.appliedMigrations.map((migration) => migration.id),
       startupRecovery: runtime.getStartupRecoverySnapshot(),

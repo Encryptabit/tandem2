@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   ReviewListResponseSchema,
   ReviewDetailResponseSchema,
-} from 'review-broker-core';
+} from '@carithecoder/review-broker-core';
 
 import { startBroker } from '../src/index.js';
 import { createDashboardRoutes } from '../src/http/dashboard-routes.js';

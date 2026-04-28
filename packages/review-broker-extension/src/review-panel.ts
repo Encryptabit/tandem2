@@ -1,4 +1,4 @@
-import type { ReviewSummary } from 'review-broker-core';
+import type { ReviewSummary } from '@carithecoder/review-broker-core';
 import type { ReviewGateState, ReviewUnitIdentity } from './types.js';
 
 export interface ReviewPanelData {

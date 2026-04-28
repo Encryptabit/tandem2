@@ -16,7 +16,7 @@ import type {
   ReviewListResponse,
   DashboardReviewActivityEntry,
   ReviewDetailResponse,
-} from 'review-broker-core';
+} from '@carithecoder/review-broker-core';
 
 import type { AppContext } from '../runtime/app-context.js';
 import type {

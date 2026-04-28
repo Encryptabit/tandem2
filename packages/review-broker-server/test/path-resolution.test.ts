@@ -76,7 +76,7 @@ describe('review-broker-server path resolution', () => {
 
     expect(findWorkspaceRoot(nestedCwd)).toBe(workspaceRoot);
     expect(resolved.dbPathSource).toBe('default');
-    expect(resolved.dbPath).toBe(path.join('/tmp/test-state-home', 'tandem2', 'review-broker.sqlite'));
+    expect(resolved.dbPath).toBe(path.join('/tmp/test-state-home', 'tandem', 'review-broker.sqlite'));
     expect(resolved.configPath).toBe(path.join(workspaceRoot, '.gsd', 'review-broker', 'config.json'));
   });
 
@@ -114,7 +114,7 @@ describe('review-broker-server path resolution', () => {
     });
 
     expect(resolved.dbPathSource).toBe('default');
-    expect(resolved.dbPath).toBe(path.join('/tmp/test-state-home', 'tandem2', 'review-broker.sqlite'));
+    expect(resolved.dbPath).toBe(path.join('/tmp/test-state-home', 'tandem', 'review-broker.sqlite'));
   });
 
   it('uses TANDEM_BROKER_DB when preferring a local Tandem extension database', () => {
@@ -178,7 +178,36 @@ describe('review-broker-server path resolution', () => {
     });
 
     expect(resolved.dbPathSource).toBe('default');
-    expect(resolved.dbPath).toBe(path.join('/tmp/test-state-home', 'tandem2', 'review-broker.sqlite'));
+    expect(resolved.dbPath).toBe(path.join('/tmp/test-state-home', 'tandem', 'review-broker.sqlite'));
+  });
+
+  it('resolves globalConfigPath under $XDG_CONFIG_HOME when set', () => {
+    const { nestedCwd } = createWorkspaceFixture();
+
+    const resolved = resolveBrokerPaths({
+      cwd: nestedCwd,
+      homeDir: '/home/tester',
+      env: {
+        HOME: '/home/tester',
+        XDG_CONFIG_HOME: '/tmp/test-config-home',
+      },
+    });
+
+    expect(resolved.globalConfigPath).toBe(path.join('/tmp/test-config-home', 'tandem', 'config.json'));
+  });
+
+  it('defaults globalConfigPath under ~/.config/tandem when XDG_CONFIG_HOME is unset', () => {
+    const { nestedCwd } = createWorkspaceFixture();
+
+    const resolved = resolveBrokerPaths({
+      cwd: nestedCwd,
+      homeDir: '/home/tester',
+      env: {
+        HOME: '/home/tester',
+      },
+    });
+
+    expect(resolved.globalConfigPath).toBe(path.join('/home/tester', '.config', 'tandem', 'config.json'));
   });
 });
 

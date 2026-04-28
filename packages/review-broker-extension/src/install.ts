@@ -201,8 +201,8 @@ import {
   createTandemReviewExtension,
   createBrokerTransportAdapter,
   ensureReviewBrokerConfigDefaults,
-} from 'review-broker-extension';
-import { startInProcessBrokerClient } from 'review-broker-client';
+} from '@carithecoder/review-broker-extension';
+import { startInProcessBrokerClient } from '@carithecoder/review-broker-client';
 
 const BROKER_DB_PATH = process.env.TANDEM_BROKER_DB?.trim() || undefined;
 const AUTHOR_ID = process.env.TANDEM_AUTHOR_ID ?? 'auto-agent';
@@ -393,18 +393,18 @@ function installGlobal(
     options.extensionPath ?? defaultGlobalExtensionRoot(options.globalPiHome),
   );
 
-  const reviewBrokerExtensionEntry = resolveModuleEntry('review-broker-extension');
+  const reviewBrokerExtensionEntry = resolveModuleEntry('@carithecoder/review-broker-extension');
   if (!reviewBrokerExtensionEntry) {
     throw new Error(
-      "Cannot resolve 'review-broker-extension' for a global install. " +
+      "Cannot resolve '@carithecoder/review-broker-extension' for a global install. " +
         'Install the package on a stable path (for example, `npm i -g review-broker-extension`) ' +
         'and try again.',
     );
   }
-  const reviewBrokerClientEntry = resolveModuleEntry('review-broker-client');
+  const reviewBrokerClientEntry = resolveModuleEntry('@carithecoder/review-broker-client');
   if (!reviewBrokerClientEntry) {
     throw new Error(
-      "Cannot resolve 'review-broker-client' for a global install. " +
+      "Cannot resolve '@carithecoder/review-broker-client' for a global install. " +
         'Install the package on a stable path (for example, `npm i -g review-broker-client`) ' +
         'and try again.',
     );

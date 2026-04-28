@@ -8,7 +8,7 @@
 
 import { z } from 'zod';
 
-import { readConfig } from '../cli/config.js';
+import { readLayeredConfig } from '../cli/config.js';
 
 export const PoolConfigSchema = z
   .object({
@@ -31,8 +31,11 @@ export type PoolConfig = z.infer<typeof PoolConfigSchema>;
  *          `null` when section is absent or the config file doesn't exist.
  * @throws  Error with field-path information when values are invalid.
  */
-export function loadPoolConfig(configPath: string): PoolConfig | null {
-  const config = readConfig(configPath);
+export function loadPoolConfig(
+  configPath: string,
+  fallbackConfigPath?: string,
+): PoolConfig | null {
+  const config = readLayeredConfig(configPath, fallbackConfigPath);
 
   const reviewerPool = config.reviewer_pool;
 

@@ -1,5 +1,5 @@
 {
-  "name": "review-broker-client",
+  "name": "@carithecoder/review-broker-client",
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -18,7 +18,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "review-broker-core": "workspace:*",
-    "tandem2": "workspace:*"
+    "@carithecoder/review-broker-core": "workspace:*",
+    "@carithecoder/tandem": "workspace:*"
   }
 }

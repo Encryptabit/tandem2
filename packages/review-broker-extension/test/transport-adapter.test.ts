@@ -8,7 +8,7 @@ import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createBrokerTransportAdapter } from '../src/transport-adapter.js';
-import type { BrokerClient } from 'review-broker-client';
+import type { BrokerClient } from '@carithecoder/review-broker-client';
 
 const execFileAsync = promisify(execFile);
 

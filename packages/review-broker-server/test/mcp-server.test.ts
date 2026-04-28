@@ -7,7 +7,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { BROKER_OPERATION_MCP_TOOL_NAMES, BROKER_OPERATIONS } from 'review-broker-core';
+import { BROKER_OPERATION_MCP_TOOL_NAMES, BROKER_OPERATIONS } from '@carithecoder/review-broker-core';
 
 import { ABSOLUTE_REVIEWER_FIXTURE_PATH, REVIEWER_FIXTURE_PATH, WORKTREE_ROOT } from './test-paths.js';
 const CLI_PATH = path.join(WORKTREE_ROOT, 'packages', 'review-broker-server', 'src', 'cli', 'start-mcp.ts');

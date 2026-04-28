@@ -1,7 +1,7 @@
-import { Agent } from '@gsd/pi-agent-core';
-import type { AgentTool, StreamFn } from '@gsd/pi-agent-core';
-import { getModel, streamSimple } from '@gsd/pi-ai';
-import type { Model } from '@gsd/pi-ai';
+import { Agent } from '@mariozechner/pi-agent-core';
+import type { AgentTool, StreamFn } from '@mariozechner/pi-agent-core';
+import { getModel, streamSimple } from '@mariozechner/pi-ai';
+import type { Model } from '@mariozechner/pi-ai';
 
 import type { BrokerService } from '../runtime/broker-service.js';
 import { REVIEWER_SYSTEM_PROMPT } from './reviewer-prompt.js';
@@ -14,7 +14,7 @@ export interface CreateReviewerAgentOptions {
   reviewerId: string;
   /** LLM model to use. Defaults to claude-sonnet-4-20250514 via Anthropic. */
   model?: Model<any>;
-  /** Stream function for LLM communication. Defaults to streamSimple from @gsd/pi-ai. */
+  /** Stream function for LLM communication. Defaults to streamSimple from @mariozechner/pi-ai. */
   streamFn?: StreamFn;
 }
 

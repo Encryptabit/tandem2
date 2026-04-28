@@ -1,10 +1,12 @@
-# tandem2
+# tandem
 
-A code-review broker for AI-assisted workflows. tandem2 owns the full review lifecycle — creation, claiming, proposals, threaded discussion, verdicts, and counter-patches — with durable SQLite-backed state, supervised reviewer processes, an operator dashboard, an MCP server, a typed TypeScript client, and a gsd-2 extension that gates autonomous unit progression on broker review.
+A code-review broker for AI-assisted workflows. tandem owns the full review lifecycle — creation, claiming, proposals, threaded discussion, verdicts, and counter-patches — with durable SQLite-backed state, supervised reviewer processes, an operator dashboard, an MCP server, a typed TypeScript client, and a gsd-2 extension that gates autonomous unit progression on broker review.
+
+Published on npm as **`@carithecoder/tandem`** (CLI bins: `tandem`, `tandem-broker`, `tandem-mcp`).
 
 ## What it does
 
-tandem2 coordinates code reviews between **proposers** (typically AI agents submitting unit work) and **reviewers** (AI workers or humans evaluating that work). The broker is the single source of truth: it owns the review queue, supervises reviewer processes, persists every transition to SQLite, and exposes that state through five integration surfaces:
+tandem coordinates code reviews between **proposers** (typically AI agents submitting unit work) and **reviewers** (AI workers or humans evaluating that work). The broker is the single source of truth: it owns the review queue, supervises reviewer processes, persists every transition to SQLite, and exposes that state through five integration surfaces:
 
 1. **`tandem` CLI** — full read/write access to broker state from a shell.
 2. **`tandem-mcp` MCP server** — the same operations exposed over MCP stdio for LLM agents.
@@ -24,14 +26,22 @@ Reviews carry a unified diff proposal, a threaded discussion, an audit/activity 
 
 ```
 packages/
-  review-broker-core/         Domain types, Zod contracts, state machine, operation registry, dashboard contracts
-  review-broker-server/       Broker runtime + SQLite persistence + reviewer manager + pool + MCP server + HTTP/dashboard layer
-                              Publishes the bins: tandem, tandem-broker, tandem-mcp (npm name: tandem2)
-  review-broker-client/       Typed TypeScript client + in-process client helper
-  review-broker-dashboard/    Astro-built operator dashboard (static dist served by the broker)
-  review-broker-extension/    gsd-2 extension that gates auto-mode unit progression behind broker reviews
+  review-broker-core/         npm: @carithecoder/review-broker-core
+                              Domain types, Zod contracts, state machine, operation registry, dashboard contracts
+  review-broker-server/       npm: @carithecoder/tandem
+                              Broker runtime + SQLite persistence + reviewer manager + pool + MCP server + HTTP/dashboard layer
+                              Publishes the bins: tandem, tandem-broker, tandem-mcp
+  review-broker-client/       npm: @carithecoder/review-broker-client
+                              Typed TypeScript client + in-process client helper
+  review-broker-dashboard/    private — Astro-built operator dashboard (static dist served by the broker)
+  review-broker-extension/    npm: @carithecoder/review-broker-extension
+                              gsd-2 extension that gates auto-mode unit progression behind broker reviews
                               Publishes the bin: tandem-review-install
 ```
+
+### Runtime dependencies
+
+The broker imports the agent runtime from upstream pi-mono — `@mariozechner/pi-agent-core` and `@mariozechner/pi-ai`. These are real npm packages and resolve through standard `node_modules`; no symlinks or vendored copies are required.
 
 ## Requirements
 
@@ -163,7 +173,9 @@ The broker emits structured JSON events on stdout (or stderr for failures):
 | `pnpm broker:test` | Run restart-persistence and start-broker smoke tests |
 | `pnpm tandem -- <args>` | Invoke the `tandem` CLI through pnpm |
 
-## Database resolution
+## Database & config resolution
+
+### Database path
 
 The broker resolves its SQLite database path with the following precedence (highest first):
 
@@ -171,9 +183,18 @@ The broker resolves its SQLite database path with the following precedence (high
 2. `REVIEW_BROKER_DB_PATH` environment variable
 3. **Project-local extension DB** (only when `preferLocalExtensionDb` is set — the `tandem dashboard` subcommand does this, the raw `start-broker --dashboard` does not):
    - If `.gsd/extensions/tandem-review.mjs` exists in the resolved workspace, the broker checks `TANDEM_BROKER_DB` and otherwise falls back to `.gsd/review-broker/broker.db`
-4. **Global default**: `${XDG_STATE_HOME:-$HOME/.local/state}/tandem2/review-broker.sqlite`
+4. **Global default**: `${XDG_STATE_HOME:-$HOME/.local/state}/tandem/review-broker.sqlite`
 
-The config file (`reviewer.providers.*`, `reviewer_pool`, etc.) follows the same idea: `REVIEW_BROKER_CONFIG_PATH` env override, otherwise `<workspaceRoot>/.gsd/review-broker/config.json`.
+### Config path (with global fallback)
+
+The config file (`reviewer.providers.*`, `reviewer_pool`, etc.) is layered:
+
+1. **Workspace primary**: `REVIEW_BROKER_CONFIG_PATH` env override, otherwise `<workspaceRoot>/.gsd/review-broker/config.json`
+2. **Global fallback**: `${XDG_CONFIG_HOME:-$HOME/.config}/tandem/config.json`
+
+Reads merge **per top-level section** with workspace winning where present and global filling holes — so a project that sets `reviewer.provider` but omits `reviewer_pool` still sees the global pool defaults. Writes always go to the primary (workspace) path.
+
+**First-run seeding.** The first time you invoke any of `tandem`, `tandem-broker`, or `tandem-mcp` and no global config exists, the broker writes a default to the global config path (with `reviewer.provider: codex`, the bundled `reviewer-worker.mjs` path, and a working `reviewer_pool` block). The seed event is emitted as `broker.global_config_seeded`. After that, the file is yours — re-running CLI commands won't overwrite it.
 
 The "workspace root" is found by walking up from `--cwd` until a directory contains either `.git` or `.gsd`.
 
@@ -210,7 +231,7 @@ All routes are served from the broker process at the dashboard host/port.
 
 ## MCP server
 
-`tandem-mcp` (or `pnpm broker:mcp`) exposes the broker's full operation set on stdio transport. Tool names mirror the `BROKER_OPERATIONS` registry in `review-broker-core`:
+`tandem-mcp` (or `pnpm broker:mcp`) exposes the broker's full operation set on stdio transport. Tool names mirror the `BROKER_OPERATIONS` registry in `@carithecoder/review-broker-core`:
 
 | Tool | Description |
 |---|---|
@@ -234,12 +255,50 @@ All routes are served from the broker process at the dashboard host/port.
 
 Request and response shapes are derived from Zod schemas — the MCP server, the typed client, and the CLI all share one source of truth. Schema drift is enforced at runtime; the `dashboard-contracts` test suite catches it at build time.
 
-## Typed client (`review-broker-client`)
+### Installing `tandem-mcp` in an MCP client
+
+The MCP server is a stdio process. Once the package is on your `PATH` (via `npm install -g @carithecoder/tandem` once published, or `npm link` from `packages/review-broker-server` for local development), point your MCP client at the `tandem-mcp` binary.
+
+**Claude Desktop** (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS, `%APPDATA%\Claude\claude_desktop_config.json` on Windows) / **Claude Code** (`.mcp.json` in the project, or `~/.claude.json` for user-level) / **Cursor** (`~/.cursor/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "tandem-review": {
+      "command": "tandem-mcp",
+      "args": []
+    }
+  }
+}
+```
+
+This default invocation reads from the global config (`~/.config/tandem/config.json`, auto-seeded on first run) and the global broker DB (`~/.local/state/tandem/review-broker.sqlite`).
+
+To bind the MCP server to a project-scoped broker DB and config:
+
+```json
+{
+  "mcpServers": {
+    "tandem-review": {
+      "command": "tandem-mcp",
+      "args": [],
+      "env": {
+        "REVIEW_BROKER_DB_PATH": "/path/to/project/.gsd/review-broker/broker.db",
+        "REVIEW_BROKER_CONFIG_PATH": "/path/to/project/.gsd/review-broker/config.json"
+      }
+    }
+  }
+}
+```
+
+Sanity check: `tandem-mcp` started without args will block on stdin waiting for the MCP handshake — `Ctrl+C` to exit. If it errors out before that, the install isn't reachable.
+
+## Typed client (`@carithecoder/review-broker-client`)
 
 The typed client is the preferred path for deterministic programmatic gates — it calls broker operations directly without going through MCP.
 
 ```ts
-import { createBrokerClient, startInProcessBrokerClient } from 'review-broker-client';
+import { createBrokerClient, startInProcessBrokerClient } from '@carithecoder/review-broker-client';
 
 // In-process: spins up its own broker runtime in the same Node process.
 const { client, close } = startInProcessBrokerClient({
@@ -292,7 +351,7 @@ npx tandem-review-install --global
 
 - Drops `.gsd/extensions/tandem-review.mjs` (the entrypoint that wires `createTandemReviewExtension` to `createBrokerTransportAdapter`).
 - Bootstraps `.gsd/review-broker/config.json` with default `reviewer.providers.codex` and `reviewer_pool` settings.
-- Resolves the `reviewer-worker.mjs` path against the installed `tandem2` package so pooled reviewers can be spawned without further configuration.
+- Resolves the `reviewer-worker.mjs` path against the installed `@carithecoder/tandem` package so pooled reviewers can be spawned without further configuration.
 
 **Global mode** (`--global`):
 
@@ -317,9 +376,14 @@ The gate keeps a paused-state file under `.gsd/review-broker/` so a Claude/agent
 
 ## Reviewer pool
 
-When `reviewer_pool` is set in `.gsd/review-broker/config.json`, the broker can manage a pool of reviewer worker processes. The bundled `packages/review-broker-server/scripts/reviewer-worker.mjs` is the default worker — it polls for pending reviews, claims one, runs analysis (via `codex` or `gsd --print`), submits a verdict, and either loops or exits.
+When `reviewer_pool` is set in the resolved broker config (workspace primary or global fallback), the broker can manage a pool of reviewer worker processes. The bundled `packages/review-broker-server/scripts/reviewer-worker.mjs` is the default worker — it polls for pending reviews, claims one, runs analysis (via `codex` or `gsd --print`), submits a verdict, and either loops or exits.
 
-Default `reviewer_pool` config installed by `tandem-review-install`:
+Two paths produce the default `reviewer_pool` block:
+
+- **`tandem-review-install`** writes the project-local `.gsd/review-broker/config.json` (see "gsd-2 review gate" above).
+- **First CLI run** auto-seeds `~/.config/tandem/config.json` (see "Database & config resolution" above) so global `tandem` invocations work out of the box without a workspace config.
+
+Both seeds use the same default values:
 
 ```json
 {
@@ -342,7 +406,7 @@ The pool is **not** started automatically by dashboards or MCP servers — those
 - **SSE is a signal, not a stream.** Change events carry only `{ topic, version }`. Authoritative reads always go through snapshot routes — reconnect and reload are safe by construction.
 - **Redaction by default.** The event feed and activity timelines drop the entire metadata blob. Only the summary string is exposed; command paths, arguments, and workspace roots never appear in dashboard responses.
 - **Reviewer recovery is conservative.** On reviewer exit/crash the broker reclaims unambiguously safe claimed reviews and detaches everything else. Stale-session reviewers from a prior crashed broker are swept on startup before normal operation resumes.
-- **One canonical contract.** All packages share Zod schemas exported from `review-broker-core` (`BROKER_OPERATIONS`, dashboard contracts, state-machine transitions). Drift is caught at runtime by request/response parsing and at build time by the contract test suite.
+- **One canonical contract.** All packages share Zod schemas exported from `@carithecoder/review-broker-core` (`BROKER_OPERATIONS`, dashboard contracts, state-machine transitions). Drift is caught at runtime by request/response parsing and at build time by the contract test suite.
 
 ## Testing
 
@@ -351,16 +415,16 @@ The pool is **not** started automatically by dashboards or MCP servers — those
 corepack pnpm test:run
 
 # Run tests for a single package
-corepack pnpm --filter review-broker-core test
-corepack pnpm --filter tandem2 test
+corepack pnpm --filter @carithecoder/review-broker-core test
+corepack pnpm --filter @carithecoder/tandem test
 
 # Common targeted suites
-corepack pnpm --filter review-broker-core exec vitest run test/dashboard-contracts.test.ts
-corepack pnpm --filter tandem2 exec vitest run test/http-dashboard-routes.test.ts
-corepack pnpm --filter tandem2 exec vitest run test/http-event-feed-routes.test.ts
-corepack pnpm --filter tandem2 exec vitest run test/http-review-routes.test.ts
-corepack pnpm --filter tandem2 exec vitest run test/broker-mounted-dashboard.integration.test.ts
-corepack pnpm --filter tandem2 exec vitest run test/dashboard-acceptance.integration.test.ts
-corepack pnpm --filter tandem2 exec vitest run test/end-to-end-standalone-parity.test.ts
-corepack pnpm --filter tandem2 exec vitest run test/tandem-cli.test.ts
+corepack pnpm --filter @carithecoder/review-broker-core exec vitest run test/dashboard-contracts.test.ts
+corepack pnpm --filter @carithecoder/tandem exec vitest run test/http-dashboard-routes.test.ts
+corepack pnpm --filter @carithecoder/tandem exec vitest run test/http-event-feed-routes.test.ts
+corepack pnpm --filter @carithecoder/tandem exec vitest run test/http-review-routes.test.ts
+corepack pnpm --filter @carithecoder/tandem exec vitest run test/broker-mounted-dashboard.integration.test.ts
+corepack pnpm --filter @carithecoder/tandem exec vitest run test/dashboard-acceptance.integration.test.ts
+corepack pnpm --filter @carithecoder/tandem exec vitest run test/end-to-end-standalone-parity.test.ts
+corepack pnpm --filter @carithecoder/tandem exec vitest run test/tandem-cli.test.ts
 ```

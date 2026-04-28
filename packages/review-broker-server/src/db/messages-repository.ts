@@ -3,7 +3,7 @@ import {
   ReviewDiscussionMessageSchema,
   type ReviewDiscussionMessage,
   type ReviewMessageAuthorRole,
-} from 'review-broker-core';
+} from '@carithecoder/review-broker-core';
 
 interface MessageRow {
   message_id: number;

@@ -6,7 +6,7 @@
       "args": [
         "pnpm",
         "--filter",
-        "tandem2",
+        "@carithecoder/tandem",
         "exec",
         "tsx",
         "src/cli/start-mcp.ts"

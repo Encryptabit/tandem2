@@ -6,7 +6,7 @@ import type {
   ReviewVerdict,
   ReviewerOfflineReason,
   ReviewerStatus,
-} from 'review-broker-core';
+} from '@carithecoder/review-broker-core';
 
 import { resolveSelectedReviewerProvider, validateReviewerWorkerCommand } from './cli/config.js';
 import type { AppContext, CreateAppContextOptions } from './runtime/app-context.js';
@@ -193,7 +193,7 @@ export function startBroker(options: StartBrokerOptions = {}): StartedBrokerRunt
 
     const configuredProvider =
       options.poolSpawnCommand === undefined && options.poolSpawnArgs === undefined
-        ? resolveSelectedReviewerProvider(context.configPath)
+        ? resolveSelectedReviewerProvider(context.configPath, context.globalConfigPath)
         : null;
 
     const spawnCommand = options.poolSpawnCommand ?? configuredProvider?.command;

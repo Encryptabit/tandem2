@@ -3,7 +3,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 
-import { REVIEW_STATUSES, REVIEWER_STATUSES, REVIEW_VERDICTS } from 'review-broker-core';
+import { REVIEW_STATUSES, REVIEWER_STATUSES, REVIEW_VERDICTS } from '@carithecoder/review-broker-core';
 
 import { inspectBrokerRuntime, startBroker, BrokerServiceError } from '../index.js';
 import type { StartedBrokerRuntime } from '../index.js';
@@ -1446,6 +1446,7 @@ async function main(): Promise<void> {
     const enableStandalonePool = dashboardArgs.includes('--enable-standalone-pool');
     runtime = startBroker({
       handleSignals: false,
+      seedGlobalConfig: true,
       ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
       ...(options.dbPath !== undefined ? { dbPath: options.dbPath } : {}),
       ...(noun === 'dashboard' ? { preferLocalExtensionDb: true } : {}),

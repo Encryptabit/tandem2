@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import { VersionedNotificationBus } from 'review-broker-core';
+import { VersionedNotificationBus } from '@carithecoder/review-broker-core';
 
 import type { AuditRepository } from '../db/audit-repository.js';
 import { createAuditRepository } from '../db/audit-repository.js';
@@ -17,10 +17,14 @@ import type { ResolveBrokerPathsOptions } from './path-resolution.js';
 import { resolveBrokerPaths } from './path-resolution.js';
 import type { PoolConfig } from './pool-config.js';
 import { loadPoolConfig } from './pool-config.js';
+import type { SeedGlobalConfigResult } from './seed-global-config.js';
+import { seedGlobalConfigIfMissing } from './seed-global-config.js';
 
 export interface CreateAppContextOptions extends ResolveBrokerPathsOptions {
   busyTimeoutMs?: number;
   notifications?: VersionedNotificationBus;
+  /** When true, write a default global config if none exists (CLI entry points only). */
+  seedGlobalConfig?: boolean;
 }
 
 export interface AppContext {
@@ -29,6 +33,8 @@ export interface AppContext {
   dbPathSource: 'argument' | 'env' | 'local-extension' | 'default';
   configPath: string;
   configPathSource: 'env' | 'default';
+  globalConfigPath: string;
+  globalConfigSeed: SeedGlobalConfigResult;
   workspaceRoot: string;
   pragmas: DatabasePragmas;
   appliedMigrations: AppliedMigration[];
@@ -60,7 +66,10 @@ export function createAppContext(options: CreateAppContextOptions = {}): AppCont
     dbPath: opened.dbPath,
     notifications,
   });
-  const poolConfig = loadPoolConfig(resolved.configPath);
+  const globalConfigSeed: SeedGlobalConfigResult = options.seedGlobalConfig
+    ? seedGlobalConfigIfMissing(resolved.globalConfigPath)
+    : { seeded: false, globalConfigPath: resolved.globalConfigPath, workerScriptPath: '', nodeExecPath: '' };
+  const poolConfig = loadPoolConfig(resolved.configPath, resolved.globalConfigPath);
 
   let closingState: 'open' | 'closing' | 'closed' = 'open';
   let shutdownPromise: Promise<ReviewerShutdownSummary> | null = null;
@@ -71,6 +80,8 @@ export function createAppContext(options: CreateAppContextOptions = {}): AppCont
     dbPathSource: resolved.dbPathSource,
     configPath: resolved.configPath,
     configPathSource: resolved.configPathSource,
+    globalConfigPath: resolved.globalConfigPath,
+    globalConfigSeed,
     workspaceRoot: resolved.workspaceRoot,
     pragmas: opened.pragmas,
     appliedMigrations: opened.appliedMigrations,

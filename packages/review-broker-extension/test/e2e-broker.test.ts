@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { startInProcessBrokerClient, type BrokerClient } from 'review-broker-client';
+import { startInProcessBrokerClient, type BrokerClient } from '@carithecoder/review-broker-client';
 
 import { createTandemReviewExtension } from '../src/index.js';
 import type {

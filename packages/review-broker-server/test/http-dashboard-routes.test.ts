@@ -9,7 +9,7 @@ import {
   OverviewPoolStateSchema,
   SSEChangePayloadSchema,
   SSEHeartbeatPayloadSchema,
-} from 'review-broker-core';
+} from '@carithecoder/review-broker-core';
 
 import { createAppContext } from '../src/runtime/app-context.js';
 import { createBrokerService } from '../src/runtime/broker-service.js';

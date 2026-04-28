@@ -111,8 +111,8 @@ describe('installTandemReviewExtension', () => {
 
       const indexContent = readFileSync(result.extensionPath, 'utf8');
       // Imports are baked as absolute file:// URLs, not bare specifiers.
-      expect(indexContent).not.toMatch(/from\s+'review-broker-extension'/);
-      expect(indexContent).not.toMatch(/from\s+'review-broker-client'/);
+      expect(indexContent).not.toMatch(/from\s+'@carithecoder\/review-broker-extension'/);
+      expect(indexContent).not.toMatch(/from\s+'@carithecoder\/review-broker-client'/);
       expect(indexContent).toMatch(/from\s+'file:\/\/.*review-broker-extension.*'/);
       expect(indexContent).toMatch(/from\s+'file:\/\/.*review-broker-client.*'/);
       // Both baked URLs point at files that exist on disk.

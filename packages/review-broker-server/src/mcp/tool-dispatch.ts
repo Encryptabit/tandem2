@@ -6,7 +6,7 @@ import {
   parseBrokerOperationResponseByMcpToolName,
   type BrokerOperationMcpToolName,
   type BrokerOperationResponseByToolName,
-} from 'review-broker-core';
+} from '@carithecoder/review-broker-core';
 
 import { ErrorCode, McpError, type CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 

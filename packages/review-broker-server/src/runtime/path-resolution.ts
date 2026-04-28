@@ -22,6 +22,7 @@ export interface ResolvedBrokerPaths {
   dbPathSource: 'argument' | 'env' | 'local-extension' | 'default';
   configPath: string;
   configPathSource: 'env' | 'default';
+  globalConfigPath: string;
 }
 
 export function resolveBrokerPaths(options: ResolveBrokerPathsOptions = {}): ResolvedBrokerPaths {
@@ -59,12 +60,15 @@ export function resolveBrokerPaths(options: ResolveBrokerPathsOptions = {}): Res
     configPathSource = 'env';
   }
 
+  const globalConfigPath = defaultGlobalConfigPath({ env, homeDir });
+
   return {
     workspaceRoot,
     dbPath,
     dbPathSource,
     configPath,
     configPathSource,
+    globalConfigPath,
   };
 }
 
@@ -114,5 +118,13 @@ function defaultBrokerDbPath(options: { env: NodeJS.ProcessEnv; homeDir: string 
     ? path.resolve(options.env.XDG_STATE_HOME)
     : path.join(options.homeDir, '.local', 'state');
 
-  return path.join(stateHome, 'tandem2', 'review-broker.sqlite');
+  return path.join(stateHome, 'tandem', 'review-broker.sqlite');
+}
+
+function defaultGlobalConfigPath(options: { env: NodeJS.ProcessEnv; homeDir: string }): string {
+  const configHome = options.env.XDG_CONFIG_HOME
+    ? path.resolve(options.env.XDG_CONFIG_HOME)
+    : path.join(options.homeDir, '.config');
+
+  return path.join(configHome, 'tandem', 'config.json');
 }

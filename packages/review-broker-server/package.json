@@ -1,5 +1,5 @@
 {
-  "name": "tandem2",
+  "name": "@carithecoder/tandem",
   "version": "0.1.0",
   "description": "Code review broker — CLI, MCP server, and dashboard for managing AI-assisted code reviews",
   "type": "module",
@@ -42,15 +42,15 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/cari/tandem2.git",
+    "url": "https://github.com/Encryptabit/tandem.git",
     "directory": "packages/review-broker-server"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
-    "@gsd/pi-agent-core": "link:/home/cari/.nvm/versions/node/v22.19.0/lib/node_modules/gsd-pi/packages/pi-agent-core",
-    "@gsd/pi-ai": "link:/home/cari/.nvm/versions/node/v22.19.0/lib/node_modules/gsd-pi/packages/pi-ai",
+    "@mariozechner/pi-agent-core": "^0.70.5",
+    "@mariozechner/pi-ai": "^0.70.5",
     "@modelcontextprotocol/sdk": "^1.18.1",
     "better-sqlite3": "^11.10.0",
     "parse-diff": "^0.11.1",
@@ -58,7 +58,7 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
-    "review-broker-core": "workspace:*",
+    "@carithecoder/review-broker-core": "workspace:*",
     "tsup": "^8.5.1"
   }
 }

@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import { ReviewerRecordSchema, type ReviewerOfflineReason, type ReviewerRecord, type ReviewerStatus } from 'review-broker-core';
+import { ReviewerRecordSchema, type ReviewerOfflineReason, type ReviewerRecord, type ReviewerStatus } from '@carithecoder/review-broker-core';
 
 interface ReviewerRow {
   reviewer_id: string;

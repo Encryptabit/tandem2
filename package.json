@@ -8,13 +8,13 @@
     "build": "corepack pnpm -r --if-present run build",
     "test": "vitest",
     "test:run": "vitest run",
-    "broker:start": "pnpm --filter tandem2 exec tsx src/cli/start-broker.ts",
-    "broker:smoke": "pnpm --filter tandem2 exec tsx src/cli/start-broker.ts --db-path ./.tmp/s01-smoke.sqlite --once",
-    "broker:dashboard": "pnpm --filter review-broker-dashboard build && pnpm --filter tandem2 exec tsx src/cli/start-broker.ts --dashboard",
-    "broker:mcp": "pnpm --filter tandem2 exec tsx src/cli/start-mcp.ts",
+    "broker:start": "pnpm --filter @carithecoder/tandem exec tsx src/cli/start-broker.ts",
+    "broker:smoke": "pnpm --filter @carithecoder/tandem exec tsx src/cli/start-broker.ts --db-path ./.tmp/s01-smoke.sqlite --once",
+    "broker:dashboard": "pnpm --filter review-broker-dashboard build && pnpm --filter @carithecoder/tandem exec tsx src/cli/start-broker.ts --dashboard",
+    "broker:mcp": "pnpm --filter @carithecoder/tandem exec tsx src/cli/start-mcp.ts",
     "broker:parity": "vitest run packages/review-broker-server/test/end-to-end-standalone-parity.test.ts",
     "broker:test": "vitest run packages/review-broker-server/test/restart-persistence.test.ts packages/review-broker-server/test/start-broker.smoke.test.ts",
-    "tandem": "pnpm --filter tandem2 exec tsx src/cli/tandem.ts"
+    "tandem": "pnpm --filter @carithecoder/tandem exec tsx src/cli/tandem.ts"
   },
   "devDependencies": {
     "@types/node": "^22.13.10",

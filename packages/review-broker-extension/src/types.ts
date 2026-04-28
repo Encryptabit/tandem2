@@ -1,4 +1,4 @@
-import type { ReviewDiscussionMessage, ReviewSummary } from 'review-broker-core';
+import type { ReviewDiscussionMessage, ReviewSummary } from '@carithecoder/review-broker-core';
 
 export type ReviewMode = 'auto' | 'human';
 export type ReviewPhase = 'idle' | 'submitting' | 'waiting' | 'completed' | 'error';

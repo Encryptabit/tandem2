@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import { ReviewActivityEntrySchema, type AuditEventType, type ReviewActivityEntry, type ReviewStatus } from 'review-broker-core';
+import { ReviewActivityEntrySchema, type AuditEventType, type ReviewActivityEntry, type ReviewStatus } from '@carithecoder/review-broker-core';
 
 interface AuditEventRow {
   audit_event_id: number;

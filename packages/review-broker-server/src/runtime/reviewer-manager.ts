@@ -3,8 +3,8 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
 
-import type { ReviewerOfflineReason, ReviewerRecord } from 'review-broker-core';
-import { ReviewerRecordSchema } from 'review-broker-core';
+import type { ReviewerOfflineReason, ReviewerRecord } from '@carithecoder/review-broker-core';
+import { ReviewerRecordSchema } from '@carithecoder/review-broker-core';
 
 import type { AuditRepository } from '../db/audit-repository.js';
 import type { ReviewersRepository } from '../db/reviewers-repository.js';

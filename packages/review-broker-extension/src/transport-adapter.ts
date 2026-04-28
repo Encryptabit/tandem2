@@ -2,13 +2,13 @@ import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import type { BrokerClient } from 'review-broker-client';
+import type { BrokerClient } from '@carithecoder/review-broker-client';
 import type {
   ReviewDiscussionMessage,
   ReviewStatus as BrokerReviewStatus,
   ReviewSummary,
   ReviewVerdict,
-} from 'review-broker-core';
+} from '@carithecoder/review-broker-core';
 import type {
   ReviewStatusRecord,
   ReviewTransport,

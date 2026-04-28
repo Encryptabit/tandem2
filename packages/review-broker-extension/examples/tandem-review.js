@@ -36,8 +36,8 @@ import {
   createTandemReviewExtension,
   createBrokerTransportAdapter,
   ensureReviewBrokerConfigDefaults,
-} from 'review-broker-extension';
-import { startInProcessBrokerClient } from 'review-broker-client';
+} from '@carithecoder/review-broker-extension';
+import { startInProcessBrokerClient } from '@carithecoder/review-broker-client';
 
 const BROKER_DB_PATH = process.env.TANDEM_BROKER_DB?.trim() || undefined;
 const AUTHOR_ID = process.env.TANDEM_AUTHOR_ID ?? 'auto-agent';

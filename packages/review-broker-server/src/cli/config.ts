@@ -24,6 +24,28 @@ export function readConfig(configPath: string): Record<string, unknown> {
 }
 
 /**
+ * Read primary config and fall back to a secondary path for any top-level
+ * key that's missing in primary. Shallow merge — primary wins per top-level
+ * key, fallback fills holes. Reading happens fresh each call (no caching) so
+ * config edits are observed immediately.
+ */
+export function readLayeredConfig(
+  primaryPath: string,
+  fallbackPath: string | undefined,
+): Record<string, unknown> {
+  const primary = readConfig(primaryPath);
+  if (!fallbackPath) {
+    return primary;
+  }
+  const fallback = readConfig(fallbackPath);
+  const merged: Record<string, unknown> = { ...fallback };
+  for (const key of Object.keys(primary)) {
+    merged[key] = primary[key];
+  }
+  return merged;
+}
+
+/**
  * Write the config object to disk as pretty-printed JSON.
  * Creates the parent directory tree if it doesn't exist.
  */
@@ -129,8 +151,9 @@ export function resolveProvider(
  */
 export function resolveSelectedReviewerProvider(
   configPath: string,
+  fallbackConfigPath?: string,
 ): { providerName: string; command: string; args?: string[] } | null {
-  const config = readConfig(configPath);
+  const config = readLayeredConfig(configPath, fallbackConfigPath);
   const reviewer = config.reviewer;
 
   if (typeof reviewer !== 'object' || reviewer === null || Array.isArray(reviewer)) {
@@ -142,11 +165,23 @@ export function resolveSelectedReviewerProvider(
     return null;
   }
 
-  const resolved = resolveProvider(configPath, providerName);
+  // Resolve from whichever layer actually owns the `reviewer` section.
+  // primary wins per the merge contract; if primary's reviewer section is
+  // missing the named provider, we still want to look it up there to surface
+  // a clear error rather than silently using the fallback.
+  const resolveFromPath = existsSync(configPath) && hasReviewerSection(readConfig(configPath))
+    ? configPath
+    : (fallbackConfigPath ?? configPath);
+  const resolved = resolveProvider(resolveFromPath, providerName);
   return {
     providerName,
     ...resolved,
   };
+}
+
+function hasReviewerSection(config: Record<string, unknown>): boolean {
+  const reviewer = config.reviewer;
+  return typeof reviewer === 'object' && reviewer !== null && !Array.isArray(reviewer);
 }
 
 /**
