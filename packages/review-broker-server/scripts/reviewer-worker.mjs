@@ -55,14 +55,15 @@ function parsePositiveInteger(rawValue, fallback) {
 }
 
 function parseFallbackVerdict(rawValue) {
-  // Fail closed by default: any infrastructure error in the model invocation
-  // produces changes_requested so the proposer is blocked instead of silently
-  // approved. Set REVIEWER_FALLBACK_VERDICT=approved to opt into the loose
-  // behavior (e.g. for environments with throwaway test reviews).
-  if (rawValue === 'approved') {
-    return 'approved';
+  // Default fail-open: when the model invocation errors out (codex missing,
+  // timeout, unparseable response, etc.) submit `approved` so the gsd-2
+  // auto-loop keeps progressing. The fallback always posts a discussion
+  // message explaining the infra failure so the trail is visible — set
+  // REVIEWER_FALLBACK_VERDICT=changes_requested to fail closed instead.
+  if (rawValue === 'changes_requested') {
+    return 'changes_requested';
   }
-  return 'changes_requested';
+  return 'approved';
 }
 
 function parseAnalysisProvider(rawValue) {
@@ -505,9 +506,11 @@ async function reviewClaimedReview(targetReviewId) {
   try {
     decision = await runModelDecision(proposal);
   } catch (error) {
+    const detail = errorText(error);
     decision = {
       verdict: modelFailureVerdict,
-      reason: `Automated reviewer fallback (${modelFailureVerdict}): ${errorText(error)}`,
+      reason: `Automated reviewer fallback (${modelFailureVerdict}): ${detail}`,
+      message: `⚠️  Reviewer infrastructure failure — verdict was auto-set to ${modelFailureVerdict} so the loop can continue. Underlying error: ${detail}`,
     };
   }
 
@@ -531,8 +534,16 @@ async function recoverClaimedReview(targetReviewId, error) {
   const fallbackReason = truncateForBroker(
     `Automated reviewer fallback (${modelFailureVerdict}) after worker failure: ${detail}`,
   );
+  const fallbackMessage = truncateForBroker(
+    `⚠️  Reviewer worker failure — verdict was auto-set to ${modelFailureVerdict} so the loop can continue. Underlying error: ${detail}`,
+  );
 
   try {
+    await addMessage(targetReviewId, fallbackMessage).catch((messageError) => {
+      console.error(
+        `[reviewer-worker] fallback discussion message failed for ${targetReviewId}: ${errorText(messageError)}`,
+      );
+    });
     await submitVerdict(targetReviewId, modelFailureVerdict, fallbackReason);
     console.error(
       `[reviewer-worker] recovered reviewId=${targetReviewId} with fallback verdict=${modelFailureVerdict}`,

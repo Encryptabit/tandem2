@@ -192,8 +192,17 @@ describe('reviewer worker script', () => {
     expect(reason).toContain('codex exited before stdin');
     expect(tandemEntries.some((entry) => entry.args[0] === 'reviews' && entry.args[1] === 'reclaim')).toBe(false);
 
+    const messageEntry = tandemEntries.find(
+      (entry) => entry.args[0] === 'discussion' && entry.args[1] === 'add',
+    );
+    expect(messageEntry).toBeDefined();
+    const bodyIndex = messageEntry!.args.indexOf('--body');
+    const messageBody = messageEntry!.args[bodyIndex + 1]!;
+    expect(messageBody).toContain('Reviewer infrastructure failure');
+    expect(messageBody).toContain('codex exited before stdin');
+
     const state = JSON.parse(readFileSync(harness.statePath, 'utf8')) as { status: string };
-    expect(state.status).toBe('changes_requested');
+    expect(state.status).toBe('approved');
   });
 
   it('model failure fallback does not echo the full proposal prompt into the verdict reason', async () => {
@@ -268,7 +277,7 @@ describe('reviewer worker script', () => {
     expect(verdictEntries[1]!.args[fallbackReasonIndex + 1]).toContain('Automated reviewer fallback');
 
     const state = JSON.parse(readFileSync(harness.statePath, 'utf8')) as { status: string };
-    expect(state.status).toBe('changes_requested');
+    expect(state.status).toBe('approved');
   });
 
   it('queue mode reclaims and exits when fallback verdict submission also fails', async () => {
@@ -517,7 +526,10 @@ if (args[0] === 'proposal' && args[1] === 'show') {
 
 if (args[0] === 'discussion' && args[1] === 'add') {
   const reviewId = args[2];
-  if (state.status === 'claimed') {
+  // Only counter-patch messages (those carrying --diff or --diff-file)
+  // transition state in the real broker. Plain comments leave status alone.
+  const carriesDiff = args.includes('--diff') || args.includes('--diff-file');
+  if (carriesDiff && state.status === 'claimed') {
     state.status = 'submitted';
     saveState();
   }
