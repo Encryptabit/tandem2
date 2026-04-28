@@ -255,6 +255,10 @@ All routes are served from the broker process at the dashboard host/port.
 
 Request and response shapes are derived from Zod schemas — the MCP server, the typed client, and the CLI all share one source of truth. Schema drift is enforced at runtime; the `dashboard-contracts` test suite catches it at build time.
 
+#### Sending diffs by path instead of inline
+
+Both `create_review` and `add_message` accept either an inline `diff` string **or** a `diffPath` (a filesystem path the broker reads). Useful when the diff is too large to fit comfortably in tool-call arguments — agents can write the diff to `/tmp/review.patch` and pass the path. The broker reads the file (relative paths resolve against the broker's `cwd`) and persists the content as the proposal diff. Provide exactly one of `diff` or `diffPath` for `create_review`; at most one for `add_message`. A read failure surfaces as `DIFF_FILE_READ_FAILED`.
+
 ### Installing `tandem-mcp` in an MCP client
 
 The MCP server is a stdio process. Once the package is on your `PATH` (via `npm install -g @carithecoder/tandem` once published, or `npm link` from `packages/review-broker-server` for local development), point your MCP client at the `tandem-mcp` binary.

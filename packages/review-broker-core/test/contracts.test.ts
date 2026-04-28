@@ -66,6 +66,73 @@ describe('review-broker-core contracts', () => {
     expect(parsed.priority).toBe('normal');
   });
 
+  it('accepts diffPath as an alternative to inline diff on createReview', () => {
+    const parsed = CreateReviewRequestSchema.parse({
+      title: 'Broker parity review',
+      description: 'Port the shared review contract first.',
+      diffPath: '/tmp/big.patch',
+      authorId: 'agent-cari',
+    });
+
+    expect(parsed.diffPath).toBe('/tmp/big.patch');
+    expect(parsed.diff).toBeUndefined();
+  });
+
+  it('rejects createReview when both diff and diffPath are provided', () => {
+    expect(() =>
+      CreateReviewRequestSchema.parse({
+        title: 'Broker parity review',
+        description: 'desc',
+        diff: 'diff --git a/x b/x',
+        diffPath: '/tmp/big.patch',
+        authorId: 'agent-cari',
+      }),
+    ).toThrowError(/exactly one/i);
+  });
+
+  it('rejects createReview when neither diff nor diffPath is provided', () => {
+    expect(() =>
+      CreateReviewRequestSchema.parse({
+        title: 'Broker parity review',
+        description: 'desc',
+        authorId: 'agent-cari',
+      }),
+    ).toThrowError(/exactly one/i);
+  });
+
+  it('accepts addMessage with diffPath alone', () => {
+    const parsed = AddMessageRequestSchema.parse({
+      reviewId: 'rvw_123',
+      actorId: 'agent-cari',
+      body: 'Replacing the diff via file.',
+      diffPath: '/tmp/counter.patch',
+    });
+    expect(parsed.diffPath).toBe('/tmp/counter.patch');
+    expect(parsed.diff).toBeUndefined();
+  });
+
+  it('rejects addMessage when both diff and diffPath are provided', () => {
+    expect(() =>
+      AddMessageRequestSchema.parse({
+        reviewId: 'rvw_123',
+        actorId: 'agent-cari',
+        body: 'message',
+        diff: 'diff --git a/x b/x',
+        diffPath: '/tmp/counter.patch',
+      }),
+    ).toThrowError(/at most one/i);
+  });
+
+  it('accepts addMessage with neither diff nor diffPath (plain message)', () => {
+    const parsed = AddMessageRequestSchema.parse({
+      reviewId: 'rvw_123',
+      actorId: 'agent-cari',
+      body: 'Just a comment, no diff.',
+    });
+    expect(parsed.diff).toBeUndefined();
+    expect(parsed.diffPath).toBeUndefined();
+  });
+
   it('keeps the future wait semantics shape in the status request contract', () => {
     const parsed = GetReviewStatusRequestSchema.parse({
       reviewId: 'rvw_123',

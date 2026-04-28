@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -229,6 +229,44 @@ describe('review-broker-server broker service', () => {
       claimedBy: 'agent-reviewer',
       claimGeneration: 1,
     });
+  });
+
+  it('reads diffPath from disk on createReview', async () => {
+    const harness = createHarness();
+    const validDiff = readFixture('valid-review.diff');
+    const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'review-broker-diffpath-'));
+    tempDirectories.push(tmpDir);
+    const patchPath = path.join(tmpDir, 'review.patch');
+    writeFileSync(patchPath, validDiff, 'utf8');
+
+    const created = await harness.service.createReview({
+      title: 'diffPath happy path',
+      description: 'Reads the diff file from disk.',
+      diffPath: patchPath,
+      authorId: 'agent-author',
+      priority: 'normal',
+    });
+
+    expect(created.proposal.diff).toBe(validDiff);
+  });
+
+  it('throws DIFF_FILE_READ_FAILED when diffPath does not exist', async () => {
+    const harness = createHarness();
+    const missingPath = path.join(os.tmpdir(), 'review-broker-nonexistent-' + Date.now() + '.patch');
+
+    try {
+      await harness.service.createReview({
+        title: 'missing diff path',
+        description: 'should fail before persisting',
+        diffPath: missingPath,
+        authorId: 'agent-author',
+        priority: 'normal',
+      });
+      throw new Error('expected createReview to throw');
+    } catch (error) {
+      expect(error).toBeInstanceOf(BrokerServiceError);
+      expect((error as BrokerServiceError).code).toBe('DIFF_FILE_READ_FAILED');
+    }
   });
 });
 

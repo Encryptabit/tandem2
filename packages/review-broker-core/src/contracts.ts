@@ -155,11 +155,18 @@ export const CreateReviewRequestSchema = z
   .object({
     title: z.string().min(1),
     description: z.string().min(1),
-    diff: z.string().min(1),
+    /** Inline diff content. Either `diff` or `diffPath` is required (exactly one). */
+    diff: z.string().min(1).optional(),
+    /** Filesystem path the broker reads to obtain the diff. Resolved relative to broker cwd. */
+    diffPath: z.string().min(1).optional(),
     authorId: ActorIdSchema,
     priority: ReviewPrioritySchema.default('normal'),
   })
-  .strict();
+  .strict()
+  .refine(
+    (value) => Boolean(value.diff) !== Boolean(value.diffPath),
+    { message: 'Provide exactly one of `diff` or `diffPath`.' },
+  );
 
 export const CreateReviewResponseSchema = z
   .object({
@@ -330,10 +337,18 @@ export const AddMessageRequestSchema = z
      * When provided by the proposer while requeueing a changes_requested review,
      * broker-service validates and persists this as the canonical review proposal
      * so reviewers do not keep evaluating stale diffs from the original round.
+     *
+     * Provide at most one of `diff` (inline) or `diffPath` (file the broker reads).
      */
     diff: z.string().min(1).optional(),
+    /** Filesystem path the broker reads to obtain the replacement diff. Resolved relative to broker cwd. */
+    diffPath: z.string().min(1).optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (value) => !(value.diff && value.diffPath),
+    { message: 'Provide at most one of `diff` or `diffPath`.' },
+  );
 
 export const AddMessageResponseSchema = z
   .object({

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import {
@@ -92,6 +93,7 @@ const REVIEW_QUEUE_TOPIC = 'review-queue';
 const REVIEWER_STATE_TOPIC = 'reviewer-state';
 
 export type BrokerServiceErrorCode =
+  | 'DIFF_FILE_READ_FAILED'
   | 'DIFF_VALIDATION_FAILED'
   | 'INVALID_COUNTER_PATCH_STATE'
   | 'INVALID_DIFF'
@@ -99,6 +101,29 @@ export type BrokerServiceErrorCode =
   | 'REVIEW_CLAIM_OWNERSHIP_MISMATCH'
   | 'REVIEW_NOT_FOUND'
   | 'STALE_CLAIM_GENERATION';
+
+/**
+ * Read `diffPath` from disk if set, otherwise return `diff`. Throws BrokerServiceError
+ * with DIFF_FILE_READ_FAILED on read errors. Resolves relative paths against process.cwd().
+ */
+function resolveDiffField(input: {
+  diff?: string | undefined;
+  diffPath?: string | undefined;
+}): string | undefined {
+  if (input.diffPath) {
+    const resolved = path.resolve(input.diffPath);
+    try {
+      return readFileSync(resolved, 'utf8');
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new BrokerServiceError({
+        code: 'DIFF_FILE_READ_FAILED',
+        message: `Failed to read diff from ${resolved}: ${reason}`,
+      });
+    }
+  }
+  return input.diff;
+}
 
 export class BrokerServiceError extends Error {
   readonly code: BrokerServiceErrorCode;
@@ -206,11 +231,13 @@ export function createBrokerService(context: AppContext, options: CreateBrokerSe
   return {
     async createReview(input) {
       const request = parseWithSchema(CreateReviewRequestSchema, input);
+      // Schema refinement guarantees exactly one of diff/diffPath, so resolvedDiff is always set.
+      const diff = resolveDiffField(request) ?? '';
       let validatedDiff;
 
       try {
         validatedDiff = validateReviewDiff({
-          diff: request.diff,
+          diff,
           workspaceRoot: context.workspaceRoot,
         });
       } catch (error) {
@@ -250,7 +277,7 @@ export function createBrokerService(context: AppContext, options: CreateBrokerSe
           workspaceRoot: context.workspaceRoot,
           projectName,
           description: request.description,
-          diff: request.diff,
+          diff,
           affectedFiles: validatedDiff.affectedFiles,
           priority: request.priority,
           authorId: request.authorId,
@@ -852,6 +879,7 @@ export function createBrokerService(context: AppContext, options: CreateBrokerSe
 
     async addMessage(input) {
       const request = parseWithSchema(AddMessageRequestSchema, input);
+      const counterPatchDiff = resolveDiffField(request);
       const current = ensureReviewExists(context, request.reviewId);
 
       if (current.status === 'closed') {
@@ -900,7 +928,7 @@ export function createBrokerService(context: AppContext, options: CreateBrokerSe
 
       let validatedCounterPatch: { diff: string; affectedFiles: string[]; fileCount: number } | null = null;
 
-      if (request.diff !== undefined) {
+      if (counterPatchDiff !== undefined) {
         const canReplaceProposal = current.status === 'changes_requested' && actorRole === 'proposer';
 
         if (!canReplaceProposal) {
@@ -929,12 +957,12 @@ export function createBrokerService(context: AppContext, options: CreateBrokerSe
 
         try {
           const validated = validateReviewDiff({
-            diff: request.diff,
+            diff: counterPatchDiff,
             workspaceRoot: context.workspaceRoot,
           });
 
           validatedCounterPatch = {
-            diff: request.diff,
+            diff: counterPatchDiff,
             affectedFiles: validated.affectedFiles,
             fileCount: validated.fileCount,
           };
